@@ -78,6 +78,23 @@ Every Go source file, and every other file that supports comments, starts with t
 
 Pentymento is pure Go: no cgo.
 
+## CLI output and messages
+
+Command output follows the CLI style in the Brand Guidelines (sections 10 and 11): results and `--json` on stdout, everything else on stderr; a status word or symbol with every colour; and every failure or warning ending with the next command on a `→` line. Use the helpers in `internal/cliout` and the message type in `internal/msg` rather than printing directly.
+
+Errors and warnings people act on (connection, privilege, gaps, verify, keys, storage) get a message ID:
+
+1. Add an entry to the registry in `internal/msg/registry.go`, with the next free number in the right block (see `docs/errors/README.md`) and a short kebab-case name.
+2. Add its troubleshooting page at `docs/errors/<ID>.md` (cause, impact, fix).
+
+IDs are permanent. Never remove, renumber or rename an entry; mark an unused one `Retired: true`. CI enforces this:
+
+```sh
+make messages
+```
+
+Exit codes are listed in `docs/reference/exit-codes.md` and defined in `internal/msg/exitcode.go`. They never change number or meaning; add a new code instead.
+
 ## Building and testing
 
 You need Go (the version in `go.mod`) and `make`.
@@ -95,6 +112,7 @@ make lint
 | `make bench` | Microbenchmarks |
 | `make lint` | `go vet`, `golangci-lint`, `staticcheck` and the licence-header check |
 | `make commits` | Commit-message and DCO check over `RANGE` |
+| `make messages` | Message-ID registry check against `BASE` |
 | `make licenses` | Dependency licence check (`go-licenses`) |
 | `make vulncheck` | Known vulnerabilities (`govulncheck`) |
 | `make gosec` | Security static analysis (`gosec`) |
@@ -111,7 +129,7 @@ PENTYM_TEST_POSTGRES=17 PENTYM_TEST_MONGODB=8.0 make test-integration
 
 | Pipeline | Runs | When |
 | --- | --- | --- |
-| `pr` | Lint, unit tests with `-race` on Linux, macOS and Windows, commits and DCO, licences, `govulncheck`, `gosec`, integration on Postgres 17 and MongoDB 8.0, benchmarks | Every pull request to `main` |
+| `pr` | Lint, unit tests with `-race` on Linux, macOS and Windows, commits and DCO, message IDs, licences, `govulncheck`, `gosec`, integration on Postgres 17 and MongoDB 8.0, benchmarks | Every pull request to `main` |
 | `nightly` | Integration on every supported Postgres and MongoDB version | Daily at 02:00 UTC, or by hand |
 | `release` | Release gates | Pushing a `v*` tag |
 

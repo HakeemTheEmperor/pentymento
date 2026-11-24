@@ -1,0 +1,15 @@
+{
+  "error": {
+    "id": "PTM-2001",
+    "target": "prod-pg",
+    "message": "cannot connect to 10.0.0.5:5432",
+    "cause": "password authentication failed for user \"pentym_backup\"",
+    "next": "check the password reference for prod-pg.backup in config, then run: pentym doctor prod-pg"
+  }
+}
+{
+  "error": {
+    "message": "unknown flag: --frobnicate",
+    "next": "pentym backup --help"
+  }
+}

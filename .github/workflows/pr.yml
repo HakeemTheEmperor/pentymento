@@ -2,8 +2,9 @@
 # Copyright 2026 Toluwalase Akinyemi
 
 # Every-PR pipeline (PRD 10.2): lint, unit tests with -race on Linux, macOS
-# and Windows, commit-message and DCO check, licence, vulnerability and
-# security checks, and the integration subset (Postgres 17, MongoDB 8.0).
+# and Windows, commit-message and DCO check, message-ID registry check,
+# licence, vulnerability and security checks, and the integration subset
+# (Postgres 17, MongoDB 8.0).
 # Target: under 15 minutes.
 
 name: pr
@@ -44,6 +45,19 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make commits RANGE=${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+
+  messages:
+    name: message IDs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: make messages BASE=${{ github.event.pull_request.base.sha }}
 
   unit:
     name: unit (${{ matrix.os }})
