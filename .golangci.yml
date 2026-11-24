@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Toluwalase Akinyemi
+
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - gosec
+    - misspell
+    - revive
+
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/HakeemTheEmperor/pentymento
