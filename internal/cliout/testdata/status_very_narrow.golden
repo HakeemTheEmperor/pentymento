@@ -1,0 +1,7 @@
+-- stdout --
+TARGET
+prod-pg
+prod-mg
+-- stderr --
+! prod-mg: agent last seen 2h 14m ago; changes since 14:02 WAT are not protected
+→ pentym catch-up prod-mg

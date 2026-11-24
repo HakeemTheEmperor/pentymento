@@ -1,0 +1,7 @@
+-- stdout --
+TARGET   ENGINE       AGENT             PITR WINDOW               LAST VERIFY
+[1mprod-pg[0m  postgres 17  [32m✓ capturing (4s)[0m  7d 0h · up to 4s ago      [32m✓ standard, 3d ago[0m
+[1mprod-mg[0m  mongodb 8.0  [33m! stale (2h 14m)[0m  6d 22h · up to 14:02 WAT  [32m✓ quick, 1d ago[0m
+-- stderr --
+[33m![0m [1mprod-mg[0m: agent last seen 2h 14m ago; changes since 14:02 WAT are not protected
+→ [1mpentym catch-up prod-mg[0m

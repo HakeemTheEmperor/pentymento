@@ -20,12 +20,15 @@ TAGS ?= integration
 # Commit range checked by `make commits`.
 RANGE ?= origin/main..HEAD
 
+# Base revision the message registry is compared with by `make messages`.
+BASE ?= origin/main
+
 # The race detector needs cgo and a C compiler. Where cgo is unavailable
 # (for example Windows without gcc) tests run without it; CI and WSL run
 # with it.
 RACE ?= $(if $(filter 1,$(shell $(GO) env CGO_ENABLED)),-race,)
 
-.PHONY: test test-integration bench lint commits licenses vulncheck gosec
+.PHONY: test test-integration bench lint commits messages licenses vulncheck gosec
 
 ## test: unit tests (no Docker needed)
 test:
@@ -51,6 +54,11 @@ lint:
 ## commits: commit-message and DCO check over RANGE
 commits:
 	$(GO) run ./internal/devtools/commitcheck $(RANGE)
+
+## messages: message registry check: docs entry for every ID, and no ID
+## removed, renamed or reused since BASE
+messages:
+	$(GO) run ./internal/devtools/msgcheck $(BASE)
 
 ## licenses: dependency licence check
 licenses:

@@ -1,0 +1,11 @@
+✗ prod-pg: cannot connect to 10.0.0.5:5432 (PTM-2001)
+  cause: password authentication failed for user "pentym_backup"
+→ check the password reference for prod-pg.backup in config, then run: pentym doctor prod-pg
+! prod-pg: role pentym_repl is a superuser; it only needs REPLICATION
+→ pentym init --print-sql   (prints the minimal role definition)
+✗ prod-pg: WAL missing from 14:10 to 14:52 WAT (slot invalidated by max_slot_wal_keep_size)
+  point-in-time recovery currently covers only points after 14:52 WAT
+→ pentym backup prod-pg   (starts a fresh base)
+✓ prod-pg: snapshot committed
+✗ unknown flag: --frobnicate
+→ pentym backup --help
