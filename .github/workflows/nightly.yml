@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Toluwalase Akinyemi
+
+# Nightly pipeline (PRD 10.2): the full database version matrix, plus chaos,
+# long fuzzing, soak and golden-repository jobs, which later chunks fill in.
+
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  integration:
+    # Each job runs the whole integration suite against one Postgres and one
+    # MongoDB version; together the jobs cover every supported version.
+    name: integration (postgres ${{ matrix.postgres }}, mongodb ${{ matrix.mongodb }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - postgres: "16"
+            mongodb: "7.0"
+          - postgres: "17"
+            mongodb: "8.0"
+          - postgres: "18"
+            mongodb: "9.0"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PENTYM_TEST_POSTGRES: ${{ matrix.postgres }}
+      PENTYM_TEST_MONGODB: ${{ matrix.mongodb }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: make test-integration
+
+  chaos:
+    # Placeholder: kill, crash and network-fault tests.
+    name: chaos
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "no chaos tests yet"
+
+  fuzz:
+    # Placeholder: long fuzzing of every byte parser.
+    name: fuzz
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "no fuzz targets yet"
+
+  soak:
+    # Placeholder: hours under load with random kills.
+    name: soak
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "no soak test yet"
+
+  golden:
+    # Placeholder: golden repositories must stay readable.
+    name: golden repositories
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "no golden repositories yet"

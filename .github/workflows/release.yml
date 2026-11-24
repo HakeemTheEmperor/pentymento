@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Toluwalase Akinyemi
+
+# Release pipeline (PRD 10.2): everything in the PR and nightly pipelines,
+# real AWS S3 and R2, and service installs on Linux, macOS and Windows; it
+# gates the release. Later chunks fill in these jobs.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    # Placeholder: the release gates and GoReleaser.
+    name: release
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "release pipeline not built yet"

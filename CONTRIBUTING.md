@@ -28,10 +28,20 @@ Commit messages follow the Go project style.
   - The prefix is a real directory in the repository, such as `internal/repo` or `cmd/pentym`.
   - Use `all:` for changes that cut across the codebase and `docs:` for documentation-only changes.
   - The summary starts lowercase and has no trailing full stop.
-  - Keep the subject to about 72 characters.
+  - The subject is at most 72 characters.
 - **Blank line**, then a **body** that explains what changed and why, wrapped at about 72 characters.
 - **References** such as `Fixes #42`, when there are any.
-- **Sign-off** line, added by `git commit -s`.
+- **Sign-off** line, added by `git commit -s`. It must be in the last paragraph and match the commit author's email.
+
+If you paste a prepared message, save it to a file and commit with `git commit -s -F <file>`, so the sign-off lands at the end rather than above your subject.
+
+CI checks every non-merge commit a pull request adds. Run the same check locally before pushing:
+
+```sh
+make commits
+```
+
+By default it checks `origin/main..HEAD`; set `RANGE=<base>..<head>` to check another range.
 
 Example:
 
@@ -83,9 +93,27 @@ make lint
 | `make test` | Unit tests, with the race detector where cgo is available |
 | `make test-integration` | Unit tests plus database integration tests (needs Docker) |
 | `make bench` | Microbenchmarks |
-| `make lint` | `go vet`, `golangci-lint` and `staticcheck`, at the versions pinned in the `Makefile` |
+| `make lint` | `go vet`, `golangci-lint`, `staticcheck` and the licence-header check |
+| `make commits` | Commit-message and DCO check over `RANGE` |
+| `make licenses` | Dependency licence check (`go-licenses`) |
+| `make vulncheck` | Known vulnerabilities (`govulncheck`) |
+| `make gosec` | Security static analysis (`gosec`) |
 
-Integration tests carry the `integration` build tag, so `make test` never needs Docker.
+Tool versions are pinned in the `Makefile`, and CI runs the same targets.
+
+Integration tests carry the `integration` build tag, so `make test` never needs Docker. They start Postgres and MongoDB containers through `testcontainers-go`. Choose the versions with environment variables; by default every supported version runs:
+
+```sh
+PENTYM_TEST_POSTGRES=17 PENTYM_TEST_MONGODB=8.0 make test-integration
+```
+
+### Continuous integration
+
+| Pipeline | Runs | When |
+| --- | --- | --- |
+| `pr` | Lint, unit tests with `-race` on Linux, macOS and Windows, commits and DCO, licences, `govulncheck`, `gosec`, integration on Postgres 17 and MongoDB 8.0, benchmarks | Every pull request to `main` |
+| `nightly` | Integration on every supported Postgres and MongoDB version | Daily at 02:00 UTC, or by hand |
+| `release` | Release gates | Pushing a `v*` tag |
 
 ### Windows
 
