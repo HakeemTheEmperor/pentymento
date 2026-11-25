@@ -130,6 +130,7 @@ func initCommand() *cobra.Command {
 		"Print the minimal MongoDB roles", "pentym init --print-mongo")
 	c.Flags().Bool("print-sql", false, "print the SQL that creates the minimal Postgres roles")
 	c.Flags().Bool("print-mongo", false, "print the commands that create the minimal MongoDB roles")
+	c.Flags().Bool("insecure-test-mode", false, "create an unencrypted repository for local development; refused for anything but a local path")
 	return c
 }
 
