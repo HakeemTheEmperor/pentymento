@@ -26,6 +26,9 @@ IDs are permanent: an ID is never reused and never changes meaning.
 | [PTM-1006](PTM-1006.md) | secret-keychain-missing |
 | [PTM-1007](PTM-1007.md) | secret-command-failed |
 | [PTM-1008](PTM-1008.md) | config-not-found |
+| [PTM-3001](PTM-3001.md) | repository-format-newer |
+| [PTM-3002](PTM-3002.md) | repository-not-found |
+| [PTM-3003](PTM-3003.md) | repository-exists |
 | [PTM-4001](PTM-4001.md) | key-slot-unlock-failed |
 | [PTM-4002](PTM-4002.md) | last-full-slot |
 | [PTM-4003](PTM-4003.md) | insecure-test-mode-remote |

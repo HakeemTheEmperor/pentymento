@@ -1,6 +1,69 @@
 # Repository format
 
-This document specifies how Pentymento stores data, so that a repository can be read without Pentymento. It grows with the implementation; the sections below cover how a snapshot's stream is cut into chunks, how chunks are named, and how each chunk is compressed. The layout, packs, the index, encryption and log segments follow.
+This document specifies how Pentymento stores data, so that a repository can be read without Pentymento. Cryptographic constructions (slots, key objects, chunk and metadata encryption) are specified in [crypto.md](crypto.md).
+
+## Layout
+
+```text
+config                                       format version and parameters (plaintext JSON)
+keys/slot-<id>                               key slots (JSON; see crypto.md)
+keys/private                                 the private key, sealed with the master key
+keys/public                                  the public key, sealed with the metadata key
+targets/<target-id>/info                     the target's name and engine
+targets/<target-id>/checkpoints/<gen>-<seq>  capture checkpoints
+events/<target-id>/<time>-<rand>             destructive events
+heartbeat/agent-<host>/<time>                agent heartbeats
+journal/<yyyy>/<mm>/<time>-<rand>            operations journal
+```
+
+Keys are "/"-separated segments of `A–Z a–z 0–9 . _ -`, never starting with "." (see `internal/backend`). `<time>` is Unix nanoseconds as 19 zero-padded digits, so keys sort by time; `<rand>` is 8 random hexadecimal characters; `<gen>` and `<seq>` are 20 zero-padded digits.
+
+### Objects are written once
+
+No object is ever rewritten. State that changes (checkpoints, heartbeats, verification results, pins) is recorded as a new object with a sortable name, and readers take the newest; prune removes superseded records. Every write except the config uses conditional create. This keeps the repository usable with write-only credentials and S3 Object Lock.
+
+The one exception is key rotation, which rewrites each log segment's header (see crypto.md).
+
+## Config
+
+`config` is plaintext JSON and holds no secrets:
+
+```json
+{
+  "version": 1,
+  "id": "3f9c2a7d18e04b6f9a1c5d2e7b8f0a14",
+  "encryption": "encrypted",
+  "chunker": {"min": 262144, "avg": 1048576, "max": 4194304},
+  "created": "2026-11-25T13:00:00Z"
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `version` | The repository format. A binary refuses a version newer than it understands; only `pentym repo upgrade` changes it. |
+| `id` | 128 random bits, hexadecimal |
+| `encryption` | `encrypted`, or `insecure-test-mode` for an unencrypted development repository |
+| `chunker` | Chunk sizes in bytes |
+
+`config` is written last when a repository is created, so a location without it is not a repository and an interrupted creation can be retried.
+
+## Target IDs
+
+Paths use an opaque 16-hex-character target ID: the first 8 bytes of keyed BLAKE3 with the metadata key as key, over `"pentymento target id v1" ‖ 0x00 ‖ target name`. The same name always gives the same ID in a repository; without the metadata key the ID reveals nothing about the name. In insecure test mode the hash is unkeyed.
+
+## Metadata objects
+
+Every object below is compact JSON, encrypted with the metadata key and bound to its own key (see crypto.md). Unknown fields are rejected.
+
+| Object | Fields |
+| --- | --- |
+| `targets/<id>/info` | `name`, `engine` |
+| Checkpoint | `target`, `generation` (the capture lease's), `seq`, `position` (engine-specific: LSN and timeline, or oplog timestamp), `time` |
+| Event | `target`, `type`, `object`, `xid`, `lsn`, `oplog_ts`, `position`, `time` |
+| Heartbeat | `host`, `agent_id`, `state` (`running` or `stopped`), `time` |
+| Journal entry | `who`, `host`, `operation`, `target`, `run_id`, `credential` (the reference used, never a secret), `start`, `end`, `result` (`ok`, `failed` or `skipped`), `detail` (scrubbed of secrets) |
+
+The newest checkpoint of a target is the last key under its `checkpoints/` prefix: the newest lease generation, then the highest sequence.
 
 ## Chunking
 
