@@ -55,6 +55,7 @@ var entries = []Entry{
 	{ID: "PTM-3001", Name: "repository-format-newer"},
 	{ID: "PTM-3002", Name: "repository-not-found"},
 	{ID: "PTM-3003", Name: "repository-exists"},
+	{ID: "PTM-3004", Name: "repository-locked"},
 	{ID: "PTM-4001", Name: "key-slot-unlock-failed"},
 	{ID: "PTM-4002", Name: "last-full-slot"},
 	{ID: "PTM-4003", Name: "insecure-test-mode-remote"},

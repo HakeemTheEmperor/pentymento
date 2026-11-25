@@ -20,6 +20,8 @@ targets/<target-id>/checkpoints/<gen>-<seq>  capture checkpoints
 events/<target-id>/<time>-<rand>             destructive events
 heartbeat/agent-<host>/<time>                agent heartbeats
 journal/<yyyy>/<mm>/<time>-<rand>            operations journal
+locks/shared-<id>, locks/exclusive-<id>      repository locks
+locks/lease-<target-id>/<generation>         capture leases
 ```
 
 Keys are "/"-separated segments of `A–Z a–z 0–9 . _ -`, never starting with "." (see `internal/backend`). `<time>` is Unix nanoseconds as 19 zero-padded digits, so keys sort by time; `<rand>` is 8 random hexadecimal characters; `<gen>` and `<seq>` are 20 zero-padded digits.
@@ -28,7 +30,10 @@ Keys are "/"-separated segments of `A–Z a–z 0–9 . _ -`, never starting wit
 
 No object is ever rewritten. State that changes (checkpoints, heartbeats, verification results, pins) is recorded as a new object with a sortable name, and readers take the newest; prune removes superseded records. Every write except the config uses conditional create. This keeps the repository usable with write-only credentials and S3 Object Lock.
 
-The one exception is key rotation, which rewrites each log segment's header (see crypto.md).
+Two exceptions:
+
+- **Locks and leases** are created with conditional create, then refreshed and released by overwriting the same object (see "Locks and leases"). Overwriting needs only write permission, and under Object Lock it adds a version.
+- **Key rotation** rewrites each log segment's header (see crypto.md).
 
 ## Config
 
@@ -203,4 +208,36 @@ Captured WAL and oplog are stored as individual objects, so recovery reads them 
 ## Local metadata cache
 
 Not part of the repository: pentym keeps a disposable copy of immutable objects (index files and snapshots) in the user's cache directory, under `pentym/<repository ID>/`, to save requests. Objects are cached exactly as stored, still encrypted. A cached index file is used only if it matches its hash name, and a cached snapshot only if it decrypts; anything else is fetched again. Deleting the cache is always safe.
+
+## Locks and leases
+
+Lock and lease records are plaintext JSON under `locks/`; they hold no secrets:
+
+```json
+{"version": 1, "kind": "lease", "id": "<target-id>", "generation": 3, "seq": 41, "state": "held",
+ "holder": {"user": "pentym", "host": "db-1", "pid": 4211, "agent_id": "…"}, "time": "2026-11-26T12:00:00Z"}
+```
+
+`kind` is `shared`, `exclusive`, `lease` or `claim`; `state` is `held` or `released`; `time` is the writer's clock, for people only, and is never compared across hosts.
+
+### Repository locks
+
+| Lock | Object | Held by | Excludes |
+| --- | --- | --- | --- |
+| Shared | `locks/shared-<id>` | Snapshot backups | The exclusive lock |
+| Exclusive | `locks/exclusive-<id>` | Prune's garbage collection, index rebuilds | Every other lock |
+
+`<id>` is 16 random hexadecimal characters. A newcomer creates its record, then lists the others; if a conflicting live lock exists it releases its own and backs off (between two exclusive locks, the lower ID wins). Holders refresh their record every 5 minutes by overwriting it with a higher `seq`. A lock is **live** while `held` and modified within the last 30 minutes **by storage time**: its modification time is compared with that of a probe object written at the moment of checking, both set by the storage, so hosts' clocks never meet. Released and stale records are deleted by prune; a holder that can delete deletes its own record on release.
+
+### Capture leases
+
+The lease for a target's generation `g` is `locks/lease-<target-id>/<g>`, `g` written as 20 zero-padded digits.
+
+- **Acquire:** create the next generation's object with conditional create, so exactly one candidate wins it: when no lease exists, when the newest record is `released`, or when the newest record has stayed unchanged (same key, `seq` and `state`) for 2 minutes **on the candidate's own monotonic clock**.
+- **Renew:** every 30 seconds, overwrite the record with the next `seq`, after checking no newer generation exists.
+- **Step down:** a holder that has not renewed successfully for 90 seconds stops capturing, before any candidate can take over at 2 minutes.
+- **Release:** overwrite the record as `released`; a standby takes over at its next check (every 15 seconds). Lease records are never deleted on release: the newest generation must survive, so generations only increase. Prune may delete older generations' records.
+- **Fencing:** checkpoints carry the writer's generation and are refused when a newer generation exists; because checkpoint keys sort by generation, a late write from an older holder would in any case sort below the new holder's.
+
+Without conditional create, candidates write `locks/lease-<target-id>/<g>-claim-<id>`, wait 10 seconds, and the lowest claim wins and writes the generation record; such a lease is reported as best-effort.
 
