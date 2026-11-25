@@ -92,15 +92,26 @@ func (o *Operation) Finish(ctx context.Context, result string, err error) error 
 // first; target filters by target ID when not empty.
 func (r *Repository) Journal(ctx context.Context, since time.Time, target string) ([]JournalEntry, error) {
 	since = since.UTC()
+	// Keys sort by time: journal/<year>/<month>/<unix nanoseconds>-<random>.
+	from := fmt.Sprintf("%s%04d/%02d/%s", journalPrefix, since.Year(), since.Month(), sortableTime(since))
+	var prefixes []string
+	if created := r.cfg.Created; created.IsZero() || since.Before(created.AddDate(0, -1, 0)) {
+		// From (nearly) the beginning: list the whole journal once rather
+		// than every month since since. This also finds entries written by
+		// a host whose clock was behind when the repository was new.
+		prefixes = []string{journalPrefix}
+	} else {
+		// Entries are grouped by month: list only the months from since on.
+		for m := time.Date(since.Year(), since.Month(), 1, 0, 0, 0, 0, time.UTC); !m.After(r.now()); m = m.AddDate(0, 1, 0) {
+			prefixes = append(prefixes, fmt.Sprintf("%s%04d/%02d/", journalPrefix, m.Year(), m.Month()))
+		}
+	}
 	var out []JournalEntry
-	// Entries are grouped by month: list only the months from since on.
-	for m := time.Date(since.Year(), since.Month(), 1, 0, 0, 0, 0, time.UTC); !m.After(r.now()); m = m.AddDate(0, 1, 0) {
-		prefix := fmt.Sprintf("%s%04d/%02d/", journalPrefix, m.Year(), m.Month())
+	for _, prefix := range prefixes {
 		keys, err := r.listKeys(ctx, prefix)
 		if err != nil {
 			return nil, err
 		}
-		from := prefix + sortableTime(since)
 		for _, k := range keys {
 			if k < from {
 				continue

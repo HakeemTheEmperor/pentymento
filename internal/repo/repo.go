@@ -98,6 +98,20 @@ func existsOr(err error) error {
 	return err
 }
 
+// CheckEmpty returns the "repository exists" error when be already holds a
+// repository, so init can stop before asking for passphrases. Create
+// checks again with conditional create.
+func CheckEmpty(ctx context.Context, be backend.Backend) error {
+	_, err := be.Stat(ctx, configKey)
+	switch {
+	case err == nil:
+		return existsOr(backend.ErrExists)
+	case errors.Is(err, backend.ErrNotFound):
+		return nil
+	}
+	return err
+}
+
 // Open reads the repository's config and checks its format version.
 func Open(ctx context.Context, be backend.Backend) (*Repository, error) {
 	b, err := readAll(ctx, be, configKey, 1<<20)

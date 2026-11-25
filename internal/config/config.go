@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/HakeemTheEmperor/pentymento/internal/secrets"
 )
 
 // Config is the pentym configuration. Keys are added by the chunks that use
@@ -20,8 +22,20 @@ type Config struct {
 	// AllowPlaintextSecrets permits secret values written directly in the
 	// config, provided the file is not readable by group or others.
 	AllowPlaintextSecrets bool `yaml:"allow_plaintext_secrets"`
+	// Repository is where backups are stored.
+	Repository Repository `yaml:"repository"`
 	// Targets are the configured databases, by name.
 	Targets map[string]Target `yaml:"targets"`
+}
+
+// Repository is the repository location and how to unlock it.
+type Repository struct {
+	// Path is the directory of a repository on local storage. It must be
+	// absolute.
+	Path string `yaml:"path"`
+	// Key is a reference to the passphrase, recovery code or age identity
+	// that unlocks a key slot when there is no terminal to ask in.
+	Key secrets.Ref `yaml:"key"`
 }
 
 // Target is one configured database.
@@ -86,6 +100,9 @@ func Load(path string, environ []string) (*Config, error) {
 }
 
 func (c *Config) validate() error {
+	if p := c.Repository.Path; p != "" && !filepath.IsAbs(p) {
+		return fmt.Errorf("repository.path must be an absolute path, not %q", p)
+	}
 	names := make([]string, 0, len(c.Targets))
 	for name := range c.Targets {
 		names = append(names, name)

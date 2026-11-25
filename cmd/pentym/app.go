@@ -45,6 +45,8 @@ type app struct {
 	getenv         func(string) string
 	opts           options
 	printer        *cliout.Printer
+	// interactive, set by tests, makes prompts work without a terminal.
+	interactive bool
 	// tel is the logging and metrics facade for one-shot commands: logs go
 	// to stderr, and only with --debug.
 	tel *telemetry.Telemetry
@@ -87,6 +89,9 @@ func (a *app) setup(cmd *cobra.Command) error {
 		return newUsageError(cmd, err.Error())
 	}
 	a.printer = p
+	if a.interactive {
+		p.Interactive = true
+	}
 
 	logger := telemetry.Discard()
 	if a.opts.debug {

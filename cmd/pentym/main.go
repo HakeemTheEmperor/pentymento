@@ -27,8 +27,15 @@ func main() {
 
 // run executes pentym with the given arguments and returns the exit code.
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) msg.ExitCode {
-	app := newApp(stdin, stdout, stderr, getenv)
-	root := app.rootCommand()
+	return newApp(stdin, stdout, stderr, getenv).execute(ctx, args)
+}
+
+// execute runs the command line args and returns the exit code.
+func (a *app) execute(ctx context.Context, args []string) msg.ExitCode {
+	root := a.rootCommand()
+	if args == nil {
+		args = []string{} // never let cobra fall back to os.Args
+	}
 	root.SetArgs(args)
 	err := root.ExecuteContext(ctx)
 	if err == nil {
@@ -36,11 +43,11 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 
 	code, m := describe(ctx, err)
-	p := app.printer
+	p := a.printer
 	if p == nil {
 		// Flags failed before the printer was built: use plain output that
 		// honours whatever global flags were parsed.
-		p = app.fallbackPrinter()
+		p = a.fallbackPrinter()
 	}
 	p.Fail(m)
 	return code

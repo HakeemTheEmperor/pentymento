@@ -24,6 +24,8 @@ Unknown keys are rejected with the file and line, so a misspelt key never passes
 | --- | --- |
 | `include` | Files applied before this one (see below) |
 | `allow_plaintext_secrets` | Allow secret values written in the file; default `false` |
+| `repository.path` | The repository directory on local storage; must be absolute |
+| `repository.key` | A [secret reference](#secrets) to what unlocks a key slot when there is no terminal to ask in |
 | `targets.<name>.engine` | `postgres` or `mongodb` |
 
 A target name is lowercase letters, digits, `-` and `_`, starts with a letter or digit, and is at most 63 characters. Two names that differ only in `-` and `_` are not allowed, because environment overrides cannot tell them apart.
@@ -35,6 +37,18 @@ targets:
   prod-mg:
     engine: mongodb
 ```
+
+## Repository
+
+```yaml
+repository:
+  path: /var/lib/pentym/repo
+  key: env:PENTYM_KEY
+```
+
+- `path` is where `pentym init` creates the repository and where every other command finds it.
+- Commands that unlock the repository (such as `pentym key add`) ask for the passphrase in a terminal. Without a terminal (scripts, cron, CI) they read `key` instead; without either they stop with [PTM-4004](../errors/PTM-4004.md).
+- A `key` value that starts with `AGE-SECRET-KEY-` is used as an age identity; anything else as a passphrase or paper recovery code. pentym tries it against every slot of that kind; `--slot <id>` limits it to one.
 
 ## Includes
 

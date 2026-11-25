@@ -504,3 +504,26 @@ func TestCheckpointFencing(t *testing.T) {
 		t.Errorf("latest checkpoint = %+v", c)
 	}
 }
+
+// TestJournalClockBehind: an entry from a host whose clock was a year
+// behind is stored under that year's month, and Journal from the start
+// still finds it.
+func TestJournalClockBehind(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	behind := f.repo.Config().Created.AddDate(-1, 0, 0)
+	f.repo.Now = func() time.Time { return behind }
+	op := f.repo.BeginOperation(Identity{User: "ada", Host: "slow-clock"}, "backup", "", "", secrets.Ref{})
+	if err := op.Finish(ctx, ResultOK, nil); err != nil {
+		t.Fatal(err)
+	}
+	f.repo.Now = nil
+	all, err := f.repo.Journal(ctx, time.Time{}, "")
+	if err != nil || len(all) != 1 || all[0].Host != "slow-clock" {
+		t.Fatalf("Journal from the start = %+v, %v", all, err)
+	}
+	recent, err := f.repo.Journal(ctx, f.repo.Config().Created.Add(-time.Hour), "")
+	if err != nil || len(recent) != 0 {
+		t.Errorf("Journal since the repository was created = %+v, %v", recent, err)
+	}
+}

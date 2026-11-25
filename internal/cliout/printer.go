@@ -58,11 +58,15 @@ type Printer struct {
 	Location *time.Location
 	Now      func() time.Time
 
-	stdin *bufio.Reader
+	stdin    *bufio.Reader
+	rawStdin io.Reader
 }
 
 // SetStdin sets where prompt answers are read from.
-func (p *Printer) SetStdin(r io.Reader) { p.stdin = bufio.NewReader(r) }
+func (p *Printer) SetStdin(r io.Reader) {
+	p.rawStdin = r
+	p.stdin = bufio.NewReader(r)
+}
 
 // Table writes a table of results to stdout.
 func (p *Printer) Table(t Table) error {
