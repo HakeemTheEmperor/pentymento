@@ -52,6 +52,9 @@ var entries = []Entry{
 	{ID: "PTM-1006", Name: "secret-keychain-missing"},
 	{ID: "PTM-1007", Name: "secret-command-failed"},
 	{ID: "PTM-1008", Name: "config-not-found"},
+	{ID: "PTM-4001", Name: "key-slot-unlock-failed"},
+	{ID: "PTM-4002", Name: "last-full-slot"},
+	{ID: "PTM-4003", Name: "insecure-test-mode-remote"},
 }
 
 // Lookup returns the registry entry for an ID.
