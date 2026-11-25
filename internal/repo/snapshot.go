@@ -163,7 +163,7 @@ func (r *Repository) WriteSnapshot(ctx context.Context, idx *Index, src io.Reade
 		}
 	}
 	// Commit: index files first, then the snapshot.
-	if err := r.writeIndex(ctx, comp, w.pending); err != nil {
+	if _, err := r.writeIndex(ctx, comp, w.pending); err != nil {
 		return nil, w.stats, err
 	}
 	meta.End = r.now().UTC()
@@ -294,7 +294,7 @@ func (w *snapWriter) flushPack() {
 		if err := w.waitUploads(); err != nil {
 			return
 		}
-		if err := w.r.writeIndex(w.ctx, w.comp, w.pending); err != nil {
+		if _, err := w.r.writeIndex(w.ctx, w.comp, w.pending); err != nil {
 			w.setErr(err)
 			return
 		}

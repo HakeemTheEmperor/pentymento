@@ -121,6 +121,20 @@ func stubArgs(c *cobra.Command) []string {
 	return a
 }
 
+// implemented lists the commands that are built; every other command is a
+// stub.
+var implemented = map[string]bool{
+	"pentym check":              true,
+	"pentym key rotate":         true,
+	"pentym repo upgrade":       true,
+	"pentym repo rebuild-index": true,
+	"pentym init":               true,
+	"pentym key add":            true,
+	"pentym key list":           true,
+	"pentym key remove":         true,
+	"pentym key export":         true,
+}
+
 func TestStubsAreNotImplemented(t *testing.T) {
 	root := newApp(nil, &bytes.Buffer{}, &bytes.Buffer{}, nil).rootCommand()
 	walk(root, func(c *cobra.Command) {
@@ -129,6 +143,12 @@ func TestStubsAreNotImplemented(t *testing.T) {
 		}
 		path := strings.Fields(c.CommandPath())[1:]
 		r := pentym(t, append(path, stubArgs(c)...)...)
+		if implemented[c.CommandPath()] {
+			if r.code == msg.ExitNotImplemented || strings.Contains(r.stderr, "not implemented") {
+				t.Errorf("%s is built but reports not implemented: %s", c.CommandPath(), r.stderr)
+			}
+			return
+		}
 		if r.code != msg.ExitNotImplemented {
 			t.Errorf("%s: exit code = %d, want %d\nstderr: %s", c.CommandPath(), r.code, msg.ExitNotImplemented, r.stderr)
 		}

@@ -52,13 +52,22 @@ var entries = []Entry{
 	{ID: "PTM-1006", Name: "secret-keychain-missing"},
 	{ID: "PTM-1007", Name: "secret-command-failed"},
 	{ID: "PTM-1008", Name: "config-not-found"},
+	{ID: "PTM-1009", Name: "repository-not-configured"},
 	{ID: "PTM-3001", Name: "repository-format-newer"},
 	{ID: "PTM-3002", Name: "repository-not-found"},
 	{ID: "PTM-3003", Name: "repository-exists"},
 	{ID: "PTM-3004", Name: "repository-locked"},
+	{ID: "PTM-3005", Name: "conditional-create-unsupported"},
 	{ID: "PTM-4001", Name: "key-slot-unlock-failed"},
 	{ID: "PTM-4002", Name: "last-full-slot"},
 	{ID: "PTM-4003", Name: "insecure-test-mode-remote"},
+	{ID: "PTM-4004", Name: "no-unlock-secret"},
+	{ID: "PTM-4005", Name: "too-few-key-slots"},
+	{ID: "PTM-4006", Name: "one-full-key-slot"},
+	{ID: "PTM-7001", Name: "object-missing"},
+	{ID: "PTM-7002", Name: "object-corrupt"},
+	{ID: "PTM-7003", Name: "pack-unindexed"},
+	{ID: "PTM-7004", Name: "object-stray"},
 }
 
 // Lookup returns the registry entry for an ID.

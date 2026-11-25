@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -27,20 +28,31 @@ func main() {
 
 // run executes pentym with the given arguments and returns the exit code.
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) msg.ExitCode {
-	app := newApp(stdin, stdout, stderr, getenv)
-	root := app.rootCommand()
+	return newApp(stdin, stdout, stderr, getenv).execute(ctx, args)
+}
+
+// execute runs the command line args and returns the exit code.
+func (a *app) execute(ctx context.Context, args []string) msg.ExitCode {
+	root := a.rootCommand()
+	if args == nil {
+		args = []string{} // never let cobra fall back to os.Args
+	}
 	root.SetArgs(args)
 	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return msg.ExitOK
 	}
+	var se *silentError
+	if errors.As(err, &se) {
+		return se.code // the command already reported the outcome
+	}
 
 	code, m := describe(ctx, err)
-	p := app.printer
+	p := a.printer
 	if p == nil {
 		// Flags failed before the printer was built: use plain output that
 		// honours whatever global flags were parsed.
-		p = app.fallbackPrinter()
+		p = a.fallbackPrinter()
 	}
 	p.Fail(m)
 	return code
@@ -78,3 +90,11 @@ func (a *app) fallbackPrinter() *cliout.Printer {
 	}
 	return p
 }
+
+// silentError ends a command with an exit code after it has already
+// printed its result, such as check's --json report of problems.
+type silentError struct{ code msg.ExitCode }
+
+func (e *silentError) Error() string { return fmt.Sprintf("exit code %d", e.code) }
+
+func silentExit(code msg.ExitCode) error { return &silentError{code: code} }

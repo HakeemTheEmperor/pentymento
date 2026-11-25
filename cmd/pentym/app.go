@@ -15,6 +15,7 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/cliout"
 	"github.com/HakeemTheEmperor/pentymento/internal/config"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
+	"github.com/HakeemTheEmperor/pentymento/internal/repo"
 	"github.com/HakeemTheEmperor/pentymento/internal/telemetry"
 )
 
@@ -45,6 +46,10 @@ type app struct {
 	getenv         func(string) string
 	opts           options
 	printer        *cliout.Printer
+	// interactive, set by tests, makes prompts work without a terminal.
+	interactive bool
+	// upgradePlan, set by tests, replaces the repository's upgrade plan.
+	upgradePlan func(*repo.Repository) ([]repo.Migration, error)
 	// tel is the logging and metrics facade for one-shot commands: logs go
 	// to stderr, and only with --debug.
 	tel *telemetry.Telemetry
@@ -87,6 +92,9 @@ func (a *app) setup(cmd *cobra.Command) error {
 		return newUsageError(cmd, err.Error())
 	}
 	a.printer = p
+	if a.interactive {
+		p.Interactive = true
+	}
 
 	logger := telemetry.Discard()
 	if a.opts.debug {

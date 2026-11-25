@@ -9,7 +9,9 @@ config                                       format version and parameters (plai
 keys/slot-<id>                               key slots (JSON; see crypto.md)
 keys/private                                 the private key, sealed with the master key
 keys/public                                  the public key, sealed with the metadata key
+keys/private-<n>                             private keys replaced by key rotation, sealed with the master key
 snapshots/<id>                               a committed snapshot
+pins/<snapshot-id>/<time>-<rand>               pin records; the newest is the snapshot's pin state
 index/<hash>                                 index files
 data/<xx>/<hash>                             packs of encrypted chunks
 wal/<target-id>/<timeline>/<segment>…        Postgres WAL segments
@@ -33,7 +35,9 @@ No object is ever rewritten. State that changes (checkpoints, heartbeats, verifi
 Two exceptions:
 
 - **Locks and leases** are created with conditional create, then refreshed and released by overwriting the same object (see "Locks and leases"). Overwriting needs only write permission, and under Object Lock it adds a version.
-- **Key rotation** rewrites each log segment's header (see crypto.md).
+- **Key rotation** overwrites `keys/private` and `keys/public`, replaces index files with re-wrapped copies, and rewrites each log segment's header (see crypto.md).
+- **Index rebuilds** replace index files with ones built from the pack trailers (see "Index").
+- **Format upgrades** (`pentym repo upgrade`) overwrite `config` with the new format version.
 
 ## Config
 
@@ -163,6 +167,8 @@ An index file, before compression and sealing:
 
 It is compressed like a chunk (header byte, then a zstd frame), sealed with the metadata key (associated data `"pentymento metadata v1" ‖ 0x00 ‖ "index"`), and stored at `index/<hash>`, where `<hash>` is the BLAKE3-256 hash of the stored bytes. A backup writes an index file every 4096 new packs and one at the end, before its snapshot. When several index files mention a chunk, any of their locations is valid.
 
+The index can always be rebuilt from the packs (`pentym repo rebuild-index`): every pack trailer lists its chunks and its wrapped data key. A rebuild writes the new index files first and deletes the old ones after, so an interrupted rebuild leaves duplicates, never gaps, and running it again finishes. Data keys in a rebuilt index are wrapped as the trailers hold them: to the key pair current when each pack was written (see "Key rotation" in crypto.md).
+
 ## Snapshots
 
 A snapshot's stream is a sequence of chunks. Its ordered list of chunk IDs is stored through the chunk store itself, so a snapshot of any size is a small object:
@@ -188,6 +194,16 @@ To read a snapshot: for each list block, read the block chunk; for each 32-byte 
 ### Commit order
 
 A snapshot is committed only after its stream ends and the process that produced it exits cleanly: the last pack and its index file are written first, the snapshot object last, with conditional create. A failed or cancelled backup leaves only packs that no snapshot references, which a later prune removes once they are older than the safety margin.
+
+## Pins
+
+A pinned snapshot is kept whatever the retention rules say, until it is unpinned. Snapshots never change, so pinning and unpinning each add a record at `pins/<snapshot-id>/<time>-<rand>`, sealed with the metadata key like other metadata objects (associated data binds it to its object key):
+
+```json
+{"snapshot": "<id>", "pinned": true, "reason": "pre-migration", "who": "ada", "host": "db-1", "time": "2026-11-26T12:00:00Z"}
+```
+
+The record with the greatest key is the snapshot's pin state, so an unpin is a record with `"pinned": false`. A snapshot with no record was never pinned. Pinning needs the snapshot to exist. Prune keeps the newest record of every snapshot it keeps, and may remove older ones.
 
 ## Log segments
 
@@ -224,8 +240,8 @@ Lock and lease records are plaintext JSON under `locks/`; they hold no secrets:
 
 | Lock | Object | Held by | Excludes |
 | --- | --- | --- | --- |
-| Shared | `locks/shared-<id>` | Snapshot backups | The exclusive lock |
-| Exclusive | `locks/exclusive-<id>` | Prune's garbage collection, index rebuilds | Every other lock |
+| Shared | `locks/shared-<id>` | Snapshot backups, `check` | The exclusive lock |
+| Exclusive | `locks/exclusive-<id>` | Prune's garbage collection, index rebuilds, key rotation, format upgrades | Every other lock |
 
 `<id>` is 16 random hexadecimal characters. A newcomer creates its record, then lists the others; if a conflicting live lock exists it releases its own and backs off. A shared lock conflicts with any exclusive lock; an exclusive lock conflicts with every other lock, so two exclusive newcomers that see each other both back off and retry later. Holders refresh their record every 5 minutes by overwriting it with a higher `seq`. A lock is **live** while `held` and modified within the last 30 minutes **by storage time**: its modification time is compared with that of a probe object written at the moment of checking, both set by the storage, so hosts' clocks never meet. Released and stale records are deleted by prune; a holder that can delete deletes its own record on release.
 

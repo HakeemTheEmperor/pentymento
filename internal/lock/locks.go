@@ -30,9 +30,9 @@ const IDLocked msg.ID = "PTM-3004"
 var ErrBlocked = errors.New("repository lock held by another operation")
 
 // Locks takes the repository's shared and exclusive locks (SDD 7.1).
-// Snapshot backups hold a shared lock; garbage collection and index
-// rebuilds hold the exclusive lock. Log segments and prune's forget phase
-// take no lock.
+// Snapshot backups and check hold a shared lock; garbage collection, index
+// rebuilds, key rotation and format upgrades hold the exclusive lock. Log
+// segments and prune's forget phase take no lock.
 //
 // Both kinds use write-then-check: a newcomer writes its lock, then lists
 // the others, and releases its own and backs off if a conflicting live lock

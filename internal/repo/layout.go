@@ -19,13 +19,21 @@ const (
 	slotPrefix       = keysPrefix + "slot-"
 	privateKeyObject = keysPrefix + "private"
 	publicKeyObject  = keysPrefix + "public"
-	targetsPrefix    = "targets/"
-	eventsPrefix     = "events/"
-	heartbeatPrefix  = "heartbeat/"
-	journalPrefix    = "journal/"
+	dataPrefix       = "data/"
+	// previousKeysPrefix holds the private keys that key rotation replaced,
+	// sealed with the master key like keys/private.
+	previousKeysPrefix = keysPrefix + "private-"
+	targetsPrefix      = "targets/"
+	eventsPrefix       = "events/"
+	heartbeatPrefix    = "heartbeat/"
+	journalPrefix      = "journal/"
 )
 
 func slotKey(id string) string { return slotPrefix + id }
+
+// previousKeyKey names the n-th replaced private key; numbers grow with each
+// rotation, so the newest sorts last.
+func previousKeyKey(n int) string { return fmt.Sprintf("%s%06d", previousKeysPrefix, n) }
 
 func targetInfoKey(tid string) string { return targetsPrefix + tid + "/info" }
 

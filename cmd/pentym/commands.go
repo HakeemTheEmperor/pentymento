@@ -55,7 +55,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root.Flags().BoolVar(&a.opts.version, "version", false, "print the version")
 
 	root.AddCommand(
-		initCommand(),
+		a.initCommand(),
 		backupCommand(),
 		agentCommand(),
 		catchUpCommand(),
@@ -64,12 +64,13 @@ func (a *app) rootCommand() *cobra.Command {
 		listCommand(),
 		statusCommand(),
 		verifyCommand(),
-		checkCommand(),
+		a.checkCommand(),
 		pruneCommand(),
 		pinCommand(),
 		dumpCommand(),
 		historyCommand(),
-		keyCommand(),
+		a.keyCommand(),
+		a.repoCommand(),
 		doctorCommand(),
 		notifyCommand(),
 		debugCommand(),
@@ -121,17 +122,6 @@ func group(use, short string, ex ...string) *cobra.Command {
 			return newUsageError(cmd, fmt.Sprintf("%s needs a subcommand: %s", cmd.CommandPath(), strings.Join(names, ", ")))
 		},
 	}
-}
-
-func initCommand() *cobra.Command {
-	c := stub("init", "Create an encrypted repository", args(),
-		"Create a repository, answering the setup questions", "pentym init",
-		"Print the minimal Postgres roles", "pentym init --print-sql",
-		"Print the minimal MongoDB roles", "pentym init --print-mongo")
-	c.Flags().Bool("print-sql", false, "print the SQL that creates the minimal Postgres roles")
-	c.Flags().Bool("print-mongo", false, "print the commands that create the minimal MongoDB roles")
-	c.Flags().Bool("insecure-test-mode", false, "create an unencrypted repository for local development; refused for anything but a local path")
-	return c
 }
 
 func backupCommand() *cobra.Command {
@@ -207,12 +197,6 @@ func verifyCommand() *cobra.Command {
 	return c
 }
 
-func checkCommand() *cobra.Command {
-	return stub("check [target]", "Check repository integrity", optionalArg("[target]"),
-		"Check the whole repository", "pentym check",
-		"Check prod-mg's data", "pentym check prod-mg")
-}
-
 func pruneCommand() *cobra.Command {
 	return stub("prune", "Apply the retention policy", args(),
 		"Show what would be deleted, then confirm", "pentym prune")
@@ -234,26 +218,6 @@ func historyCommand() *cobra.Command {
 	c := stub("history <target>", "Show the operations journal", args("<target>"),
 		"Show the last 30 days of operations on prod-mg", "pentym history prod-mg --since 30d")
 	c.Flags().String("since", "", "show operations from this long ago, such as 30d")
-	return c
-}
-
-func keyCommand() *cobra.Command {
-	c := group("key", "Manage key slots",
-		"List key slots", "pentym key list",
-		"Print a paper recovery code", "pentym key export --paper")
-	// The arguments of the key subcommands are defined when key management
-	// is built; until then they accept any.
-	export := stub("export", "Export a key", cobra.ArbitraryArgs,
-		"Print a paper recovery code", "pentym key export --paper")
-	export.Flags().Bool("paper", false, "print a paper recovery code")
-	c.AddCommand(
-		stub("add", "Add a key slot", cobra.ArbitraryArgs, "Add a key slot", "pentym key add"),
-		stub("list", "List key slots", cobra.ArbitraryArgs, "List key slots", "pentym key list"),
-		stub("remove", "Remove a key slot", cobra.ArbitraryArgs, "Remove a key slot", "pentym key remove"),
-		stub("rotate", "Generate a new repository key pair and re-wrap every data key", cobra.ArbitraryArgs,
-			"Rotate the repository key pair", "pentym key rotate"),
-		export,
-	)
 	return c
 }
 
