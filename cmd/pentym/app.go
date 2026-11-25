@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/cliout"
 	"github.com/HakeemTheEmperor/pentymento/internal/config"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
+	"github.com/HakeemTheEmperor/pentymento/internal/telemetry"
 )
 
 // Log formats for --log-format.
@@ -43,6 +45,9 @@ type app struct {
 	getenv         func(string) string
 	opts           options
 	printer        *cliout.Printer
+	// tel is the logging and metrics facade for one-shot commands: logs go
+	// to stderr, and only with --debug.
+	tel *telemetry.Telemetry
 }
 
 func newApp(stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) *app {
@@ -82,7 +87,39 @@ func (a *app) setup(cmd *cobra.Command) error {
 		return newUsageError(cmd, err.Error())
 	}
 	a.printer = p
+
+	logger := telemetry.Discard()
+	if a.opts.debug {
+		logger, err = telemetry.NewLogger(a.stderr, a.opts.logFormat, p.ErrTerminal, slog.LevelDebug)
+		if err != nil {
+			return newUsageError(cmd, err.Error())
+		}
+	}
+	a.tel = telemetry.New(logger, nil)
 	return nil
+}
+
+// progress returns a progress reporter for label: a redrawn stderr line on
+// a terminal, JSON events on stderr with --json, an info log line on stderr
+// every 30 s otherwise, and nothing with -q.
+func (a *app) progress(label string, total int64) (*telemetry.Progress, error) {
+	o := telemetry.ProgressOptions{W: a.stderr, Label: label, Total: total, Unicode: a.printer.Unicode}
+	switch {
+	case a.opts.quiet:
+		o.Mode = telemetry.ProgressOff
+	case a.opts.json:
+		o.Mode = telemetry.ProgressJSON
+	case a.printer.ErrTerminal:
+		o.Mode = telemetry.ProgressTerminal
+	default:
+		o.Mode = telemetry.ProgressLog
+		logger, err := telemetry.NewLogger(a.stderr, a.opts.logFormat, false, slog.LevelInfo)
+		if err != nil {
+			return nil, err
+		}
+		o.Logger = logger
+	}
+	return telemetry.NewProgress(o), nil
 }
 
 // configPath is the config file to use: --config, else $PENTYM_CONFIG,

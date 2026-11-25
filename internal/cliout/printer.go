@@ -51,6 +51,9 @@ type Printer struct {
 	// Interactive reports whether prompts can be shown: stdin and stderr
 	// are both terminals.
 	Interactive bool
+	// ErrTerminal reports whether stderr is a terminal, where progress is
+	// a redrawn line.
+	ErrTerminal bool
 	// Location and Now give the local time zone and clock for human times.
 	Location *time.Location
 	Now      func() time.Time
