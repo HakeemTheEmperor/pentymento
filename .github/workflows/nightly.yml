@@ -41,6 +41,21 @@ jobs:
           go-version-file: go.mod
       - run: make test-integration
 
+  large-snapshot:
+    # A 4 GiB synthetic stream must round-trip with flat memory, and a
+    # slightly changed copy must deduplicate (Build Order C09).
+    name: large snapshot (4 GiB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PENTYM_TEST_LARGE_MIB: "4096"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go test -run '^TestLargeSnapshot$' -v -timeout 50m ./internal/repo/
+
   chaos:
     # Placeholder: kill, crash and network-fault tests.
     name: chaos

@@ -9,6 +9,9 @@ config                                       format version and parameters (plai
 keys/slot-<id>                               key slots (JSON; see crypto.md)
 keys/private                                 the private key, sealed with the master key
 keys/public                                  the public key, sealed with the metadata key
+snapshots/<id>                               a committed snapshot
+index/<hash>                                 index files
+data/<xx>/<hash>                             packs of encrypted chunks
 targets/<target-id>/info                     the target's name and engine
 targets/<target-id>/checkpoints/<gen>-<seq>  capture checkpoints
 events/<target-id>/<time>-<rand>             destructive events
@@ -123,3 +126,58 @@ Each chunk is compressed on its own, so it can be read with a single range reque
 | `0x01` | One zstd frame (RFC 8878) holding the chunk |
 
 A chunk is stored raw when zstd would save less than 3%: when the compressed frame is more than 97% of the raw size. Readers must reject any other header byte, a `0x01` header with no frame, and content that decodes to more than the maximum chunk size.
+
+## Packs
+
+A pack holds encrypted chunks back to back, then a trailer that describes them, so the index can be rebuilt by reading the end of each pack:
+
+```text
+chunk 0 | chunk 1 | … | sealed trailer | trailer length (uint32, big-endian) | "PTMp" | version (1 byte, = 1)
+```
+
+- Each chunk is `seal(data key, compressed chunk, "pentymento chunk v1" ‖ 0x00 ‖ chunk ID)` (see crypto.md), with one random data key per pack.
+- A pack is closed after the chunk that brings it to 16 MiB, so packs are 16 to 20 MiB.
+- The trailer, before sealing, is: wrapped-key length (uint16) | wrapped data key | chunk count (uint32) | one 44-byte entry per chunk: chunk ID (32) | offset of the encrypted chunk in the pack (uint32) | its length (uint32) | the chunk's raw length (uint32). It is sealed with the metadata key, with associated data `"pentymento metadata v1" ‖ 0x00 ‖ "pack-trailer"`.
+- A pack's key is `data/<first two hex characters>/<hash>`, where `<hash>` is the BLAKE3-256 hash of the pack's stored bytes, in hexadecimal. `check` verifies every pack against its name.
+
+All integers are big-endian.
+
+## Index
+
+The index maps every chunk ID to its pack, offset and lengths, and every pack to its wrapped data key. It is the union of all index files.
+
+An index file, before compression and sealing:
+
+```text
+"PTMi" | version (1 byte, = 1) | pack count (uint32) | for each pack:
+  pack hash (32) | wrapped-key length (uint16) | wrapped data key | chunk count (uint32) | 44-byte entries as in the pack trailer
+```
+
+It is compressed like a chunk (header byte, then a zstd frame), sealed with the metadata key (associated data `"pentymento metadata v1" ‖ 0x00 ‖ "index"`), and stored at `index/<hash>`, where `<hash>` is the BLAKE3-256 hash of the stored bytes. A backup writes an index file every 4096 new packs and one at the end, before its snapshot. When several index files mention a chunk, any of their locations is valid.
+
+## Snapshots
+
+A snapshot's stream is a sequence of chunks. Its ordered list of chunk IDs is stored through the chunk store itself, so a snapshot of any size is a small object:
+
+- The 32-byte IDs are grouped into **chunk-list blocks**. A block ends after an ID whose first two bytes, read as a big-endian number, are below 2, once the block holds at least 1024 IDs; or when it reaches 131,072 IDs. Since chunk IDs are keyed hashes, blocks average about 32,768 IDs (1 MiB), and unchanged runs of chunks give unchanged blocks, which deduplicate between snapshots.
+- Each block is stored as an ordinary chunk.
+
+`snapshots/<id>` is a metadata object (JSON, sealed with the metadata key), where `<id>` is 128 random bits in hexadecimal:
+
+| Field | Meaning |
+| --- | --- |
+| `id` | The snapshot ID |
+| `target` | The target ID |
+| `engine`, `engine_version` | The database engine and its version |
+| `start_position`, `end_position`, `timeline` | Where the base backup starts and ends in the engine's log (LSN and timeline, or oplog timestamps) |
+| `inventory` | The engine's object inventory, recorded at backup time, for verification |
+| `start`, `end` | When the backup ran |
+| `size`, `chunks` | The stream's length in bytes and number of chunks |
+| `list` | The chunk IDs of the chunk-list blocks, in order |
+
+To read a snapshot: for each list block, read the block chunk; for each 32-byte ID in it, read that chunk; concatenate the chunks. Every chunk is checked against its ID after decryption and decompression.
+
+### Commit order
+
+A snapshot is committed only after its stream ends and the process that produced it exits cleanly: the last pack and its index file are written first, the snapshot object last, with conditional create. A failed or cancelled backup leaves only packs that no snapshot references, which a later prune removes once they are older than the safety margin.
+
