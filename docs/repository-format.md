@@ -11,6 +11,7 @@ keys/private                                 the private key, sealed with the ma
 keys/public                                  the public key, sealed with the metadata key
 keys/private-<n>                             private keys replaced by key rotation, sealed with the master key
 snapshots/<id>                               a committed snapshot
+pins/<snapshot-id>/<time>-<rand>               pin records; the newest is the snapshot's pin state
 index/<hash>                                 index files
 data/<xx>/<hash>                             packs of encrypted chunks
 wal/<target-id>/<timeline>/<segment>…        Postgres WAL segments
@@ -193,6 +194,16 @@ To read a snapshot: for each list block, read the block chunk; for each 32-byte 
 ### Commit order
 
 A snapshot is committed only after its stream ends and the process that produced it exits cleanly: the last pack and its index file are written first, the snapshot object last, with conditional create. A failed or cancelled backup leaves only packs that no snapshot references, which a later prune removes once they are older than the safety margin.
+
+## Pins
+
+A pinned snapshot is kept whatever the retention rules say, until it is unpinned. Snapshots never change, so pinning and unpinning each add a record at `pins/<snapshot-id>/<time>-<rand>`, sealed with the metadata key like other metadata objects (associated data binds it to its object key):
+
+```json
+{"snapshot": "<id>", "pinned": true, "reason": "pre-migration", "who": "ada", "host": "db-1", "time": "2026-11-26T12:00:00Z"}
+```
+
+The record with the greatest key is the snapshot's pin state, so an unpin is a record with `"pinned": false`. A snapshot with no record was never pinned. Pinning needs the snapshot to exist. Prune keeps the newest record of every snapshot it keeps, and may remove older ones.
 
 ## Log segments
 
