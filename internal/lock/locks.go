@@ -36,9 +36,11 @@ var ErrBlocked = errors.New("repository lock held by another operation")
 //
 // Both kinds use write-then-check: a newcomer writes its lock, then lists
 // the others, and releases its own and backs off if a conflicting live lock
-// exists. Between two exclusive locks the lower ID wins. With a strongly
-// consistent backend this never lets conflicting holders proceed together;
-// at worst both back off and retry later.
+// exists. A shared lock conflicts with any exclusive lock; an exclusive
+// lock conflicts with every other lock. Because each newcomer checks only
+// after its own record is visible, two conflicting newcomers can never
+// both miss each other: with a strongly consistent backend, conflicting
+// holders never proceed together, and at worst both back off and retry.
 type Locks struct {
 	be     backend.Backend
 	holder Holder
@@ -104,8 +106,9 @@ func (m *Locks) acquire(ctx context.Context, kind string) (*Lock, error) {
 }
 
 // conflicts returns the live locks that stop l: for a shared lock, any
-// exclusive lock; for an exclusive lock, any shared lock and any exclusive
-// lock with a lower ID.
+// exclusive lock; for an exclusive lock, any other lock at all. (An
+// earlier version let the lower ID win between exclusive locks, which let
+// a newcomer proceed beside an exclusive lock already held.)
 func (m *Locks) conflicts(ctx context.Context, l *Lock) ([]Record, error) {
 	live, err := m.Live(ctx)
 	if err != nil {
@@ -116,10 +119,7 @@ func (m *Locks) conflicts(ctx context.Context, l *Lock) ([]Record, error) {
 		if r.ID == l.rec.ID {
 			continue
 		}
-		switch {
-		case l.rec.Kind == KindShared && r.Kind == KindExclusive,
-			l.rec.Kind == KindExclusive && r.Kind == KindShared,
-			l.rec.Kind == KindExclusive && r.Kind == KindExclusive && r.ID < l.rec.ID:
+		if l.rec.Kind == KindExclusive || r.Kind == KindExclusive {
 			out = append(out, r)
 		}
 	}

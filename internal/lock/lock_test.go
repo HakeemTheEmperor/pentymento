@@ -97,21 +97,46 @@ func TestExclusiveExcludes(t *testing.T) {
 	}
 }
 
-func TestExclusiveTieBreak(t *testing.T) {
+// TestExclusiveBlocksEveryNewcomer: a held exclusive lock blocks any
+// newcomer, whatever the IDs. (This failed half the time when the lower ID
+// won between exclusive locks: CI caught it.)
+func TestExclusiveBlocksEveryNewcomer(t *testing.T) {
+	for _, ids := range [][2]string{
+		{"ffffffffffffffff", "0000000000000000"}, // newcomer's ID is lower
+		{"0000000000000000", "ffffffffffffffff"}, // newcomer's ID is higher
+	} {
+		be, _ := newBackend(t)
+		held := Record{Version: 1, Kind: KindExclusive, ID: ids[0], State: StateHeld}
+		if err := putRecord(ctx, be, lockKey(KindExclusive, held.ID), held, true); err != nil {
+			t.Fatal(err)
+		}
+		m := NewLocks(be, holder("newcomer"))
+		for _, kind := range []string{KindExclusive, KindShared} {
+			l := &Lock{m: m, key: lockKey(kind, ids[1]), rec: Record{Kind: kind, ID: ids[1], State: StateHeld}}
+			if c, _ := m.conflicts(ctx, l); len(c) != 1 {
+				t.Errorf("held exclusive %s, %s newcomer %s: %d conflicts, want 1", ids[0], kind, ids[1], len(c))
+			}
+		}
+	}
+}
+
+// TestSimultaneousExclusiveNewcomers: two exclusive newcomers that both
+// wrote before either checked both back off.
+func TestSimultaneousExclusiveNewcomers(t *testing.T) {
 	be, _ := newBackend(t)
-	// Two exclusive records written before either checks: the lower ID wins.
-	low := Record{Version: 1, Kind: KindExclusive, ID: "0000000000000001", State: StateHeld}
-	if err := putRecord(ctx, be, lockKey(KindExclusive, low.ID), low, true); err != nil {
-		t.Fatal(err)
+	m := NewLocks(be, holder("x"))
+	var locks []*Lock
+	for _, id := range []string{"0000000000000001", "ffffffffffffffff"} {
+		l := &Lock{m: m, key: lockKey(KindExclusive, id), rec: Record{Version: 1, Kind: KindExclusive, ID: id, State: StateHeld}}
+		if err := putRecord(ctx, be, l.key, l.rec, true); err != nil {
+			t.Fatal(err)
+		}
+		locks = append(locks, l)
 	}
-	m := NewLocks(be, holder("high"))
-	l := &Lock{m: m, key: lockKey(KindExclusive, "ffffffffffffffff"), rec: Record{Kind: KindExclusive, ID: "ffffffffffffffff", State: StateHeld}}
-	if c, _ := m.conflicts(ctx, l); len(c) != 1 {
-		t.Errorf("higher ID sees %d conflicts, want 1", len(c))
-	}
-	l.rec.ID, l.key = "0000000000000000", lockKey(KindExclusive, "0000000000000000")
-	if c, _ := m.conflicts(ctx, l); len(c) != 0 {
-		t.Errorf("lower ID sees %d conflicts, want 0", len(c))
+	for _, l := range locks {
+		if c, _ := m.conflicts(ctx, l); len(c) != 1 {
+			t.Errorf("newcomer %s sees %d conflicts, want 1 (both back off)", l.rec.ID, len(c))
+		}
 	}
 }
 
@@ -150,6 +175,9 @@ func TestLockExclusionConcurrent(t *testing.T) {
 			if l.Kind() == KindExclusive {
 				exclusive++
 			}
+		}
+		if exclusive > 1 {
+			t.Fatalf("round %d: %d exclusive locks held at once", round, exclusive)
 		}
 		if exclusive > 0 && len(held) > 1 {
 			t.Fatalf("round %d: an exclusive lock held alongside %d others", round, len(held)-1)
@@ -681,6 +709,36 @@ func TestGenerationsNeverReset(t *testing.T) {
 		}
 		if err := l.Release(ctx); err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+// TestConcurrentExclusive: many processes race for the exclusive lock at
+// once, and held locks are kept, so later arrivals meet a held lock; never
+// more than one may hold it.
+func TestConcurrentExclusive(t *testing.T) {
+	for round := range 30 {
+		be, _ := newBackend(t)
+		var mu sync.Mutex
+		winners := 0
+		var wg sync.WaitGroup
+		for i := range 8 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := NewLocks(be, holder(fmt.Sprint(i))).AcquireExclusive(ctx)
+				if err == nil {
+					mu.Lock()
+					winners++
+					mu.Unlock()
+				} else if !errors.Is(err, ErrBlocked) {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}()
+		}
+		wg.Wait()
+		if winners > 1 {
+			t.Fatalf("round %d: %d processes hold the exclusive lock", round, winners)
 		}
 	}
 }

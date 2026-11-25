@@ -227,7 +227,7 @@ Lock and lease records are plaintext JSON under `locks/`; they hold no secrets:
 | Shared | `locks/shared-<id>` | Snapshot backups | The exclusive lock |
 | Exclusive | `locks/exclusive-<id>` | Prune's garbage collection, index rebuilds | Every other lock |
 
-`<id>` is 16 random hexadecimal characters. A newcomer creates its record, then lists the others; if a conflicting live lock exists it releases its own and backs off (between two exclusive locks, the lower ID wins). Holders refresh their record every 5 minutes by overwriting it with a higher `seq`. A lock is **live** while `held` and modified within the last 30 minutes **by storage time**: its modification time is compared with that of a probe object written at the moment of checking, both set by the storage, so hosts' clocks never meet. Released and stale records are deleted by prune; a holder that can delete deletes its own record on release.
+`<id>` is 16 random hexadecimal characters. A newcomer creates its record, then lists the others; if a conflicting live lock exists it releases its own and backs off. A shared lock conflicts with any exclusive lock; an exclusive lock conflicts with every other lock, so two exclusive newcomers that see each other both back off and retry later. Holders refresh their record every 5 minutes by overwriting it with a higher `seq`. A lock is **live** while `held` and modified within the last 30 minutes **by storage time**: its modification time is compared with that of a probe object written at the moment of checking, both set by the storage, so hosts' clocks never meet. Released and stale records are deleted by prune; a holder that can delete deletes its own record on release.
 
 ### Capture leases
 
