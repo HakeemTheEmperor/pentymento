@@ -53,6 +53,7 @@ func NewPrinter(stdin io.Reader, stdout, stderr io.Writer, s Settings) (*Printer
 		Unicode:     !s.ASCII && unicodeSupported(stdout, getenv),
 		Verbosity:   s.Verbosity,
 		Interactive: inTTY && errTTY,
+		ErrTerminal: errTTY,
 	}
 	if outTTY {
 		if f, ok := stdout.(*os.File); ok {
