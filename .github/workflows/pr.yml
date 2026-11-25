@@ -134,14 +134,32 @@ jobs:
       - run: make test-integration
 
   bench:
-    # Placeholder: runs the microbenchmarks. The benchstat comparison
-    # against the base branch is added with the first microbenchmarks.
+    # Microbenchmarks on the base and the head, compared with benchstat
+    # (PRD 10.3). Time regressions over 10% become warning annotations; they
+    # do not fail the job, because shared runners are too noisy to gate on.
     name: bench
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      BENCH: -run ^$ -bench . -benchmem -count=6 -benchtime=200ms
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: make bench
+      - name: benchmark the base
+        run: |
+          git worktree add "$RUNNER_TEMP/base" "${{ github.event.pull_request.base.sha }}"
+          (cd "$RUNNER_TEMP/base" && go test $BENCH ./...) > "$RUNNER_TEMP/base.txt" || true
+      - name: benchmark the head
+        run: go test $BENCH ./... > "$RUNNER_TEMP/head.txt"
+      - name: compare
+        run: |
+          {
+            echo '## Benchmarks (base → head)'
+            echo '```'
+            make -s benchstat OLD="$RUNNER_TEMP/base.txt" NEW="$RUNNER_TEMP/head.txt"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"

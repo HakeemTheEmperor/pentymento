@@ -31,3 +31,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Failure files written by pgregory.net/rapid property tests
+testdata/rapid/
