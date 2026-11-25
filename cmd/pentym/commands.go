@@ -64,12 +64,13 @@ func (a *app) rootCommand() *cobra.Command {
 		listCommand(),
 		statusCommand(),
 		verifyCommand(),
-		checkCommand(),
+		a.checkCommand(),
 		pruneCommand(),
 		pinCommand(),
 		dumpCommand(),
 		historyCommand(),
 		a.keyCommand(),
+		a.repoCommand(),
 		doctorCommand(),
 		notifyCommand(),
 		debugCommand(),
@@ -194,12 +195,6 @@ func verifyCommand() *cobra.Command {
 		"Run the standard verification on prod-mg", "pentym verify prod-mg --level standard")
 	c.Flags().String("level", "", "verification level: quick, standard or deep")
 	return c
-}
-
-func checkCommand() *cobra.Command {
-	return stub("check [target]", "Check repository integrity", optionalArg("[target]"),
-		"Check the whole repository", "pentym check",
-		"Check prod-mg's data", "pentym check prod-mg")
 }
 
 func pruneCommand() *cobra.Command {

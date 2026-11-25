@@ -318,6 +318,10 @@ func TestSecretLeakKeys(t *testing.T) {
 			{"key", "add", "--key", "env:K3", "--agent"},
 			{"key", "export", "--paper"},
 			{"key", "remove", "0011223344556677"},
+			{"key", "rotate"},
+			{"check", "--full"},
+			{"repo", "rebuild-index"},
+			{"repo", "upgrade"},
 		}
 		for _, args := range runs {
 			r := c.pentym(append(append([]string{}, mode...), args...)...)

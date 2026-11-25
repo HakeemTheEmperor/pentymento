@@ -15,6 +15,7 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/cliout"
 	"github.com/HakeemTheEmperor/pentymento/internal/config"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
+	"github.com/HakeemTheEmperor/pentymento/internal/repo"
 	"github.com/HakeemTheEmperor/pentymento/internal/telemetry"
 )
 
@@ -47,6 +48,8 @@ type app struct {
 	printer        *cliout.Printer
 	// interactive, set by tests, makes prompts work without a terminal.
 	interactive bool
+	// upgradePlan, set by tests, replaces the repository's upgrade plan.
+	upgradePlan func(*repo.Repository) ([]repo.Migration, error)
 	// tel is the logging and metrics facade for one-shot commands: logs go
 	// to stderr, and only with --debug.
 	tel *telemetry.Telemetry

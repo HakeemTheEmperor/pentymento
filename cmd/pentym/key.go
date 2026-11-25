@@ -61,8 +61,7 @@ func (a *app) keyCommand() *cobra.Command {
 		a.keyAddCommand(),
 		a.keyListCommand(),
 		a.keyRemoveCommand(),
-		stub("rotate", "Generate a new repository key pair and re-wrap every data key", args(),
-			"Rotate the repository key pair", "pentym key rotate"),
+		a.keyRotateCommand(),
 		a.keyExportCommand(),
 	)
 	return c
@@ -115,7 +114,7 @@ func (a *app) keyListCommand() *cobra.Command {
 
 func oneFullSlotWarning() msg.Message {
 	return msg.Message{
-		Level:  msg.LevelWarning,
+		Level: msg.LevelWarning, ID: idOneFullSlot,
 		Fact:   "the repository has only one full key slot",
 		Impact: "losing its passphrase or identity would make every backup unreadable",
 		Next:   "pentym key add, or pentym key export --paper",

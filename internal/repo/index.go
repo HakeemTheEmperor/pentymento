@@ -168,10 +168,10 @@ func parseIndex(b []byte) ([]packRecord, error) {
 }
 
 // writeIndex stores an index file for packs, named by the hash of its
-// stored bytes.
-func (r *Repository) writeIndex(ctx context.Context, c *compress.Compressor, packs []packRecord) error {
+// stored bytes, and returns its key.
+func (r *Repository) writeIndex(ctx context.Context, c *compress.Compressor, packs []packRecord) (string, error) {
 	if len(packs) == 0 {
-		return nil
+		return "", nil
 	}
 	b := c.Compress(nil, marshalIndex(packs))
 	if !r.cfg.Insecure() {
@@ -181,53 +181,81 @@ func (r *Repository) writeIndex(ctx context.Context, c *compress.Compressor, pac
 	key := indexPrefix + PackID(sum).String()
 	err := r.be.Put(ctx, key, bytes.NewReader(b), backend.PutOptions{IfNotExists: true})
 	if errors.Is(err, backend.ErrExists) {
-		return nil
+		return key, nil
 	}
-	return err
+	return key, err
 }
 
 // LoadIndex reads every index file into memory.
 func (r *Repository) LoadIndex(ctx context.Context) (*Index, error) {
+	x := newIndex()
+	err := r.eachIndexFile(ctx, func(_ string, packs []packRecord, err error) error {
+		if err != nil {
+			return err
+		}
+		for _, p := range packs {
+			x.add(p)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// eachIndexFile reads every index file in key order and calls fn with its
+// pack records, or with the error that made it unreadable. fn's error
+// stops the walk.
+func (r *Repository) eachIndexFile(ctx context.Context, fn func(key string, packs []packRecord, err error) error) error {
 	if !r.unlocked {
-		return nil, ErrLocked
+		return ErrLocked
 	}
 	keys, err := r.listKeys(ctx, indexPrefix)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	c, err := compress.New(compress.Default, indexMaxBytes)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = c.Close() }()
 	if r.cache != nil {
 		r.cache.retain(indexPrefix, keys)
 	}
-	x := newIndex()
 	for _, k := range keys {
-		matches := func(b []byte) bool { return indexPrefix+PackID(blake3.Sum256(b)).String() == k }
-		b, err := r.cachedRead(ctx, k, indexMaxBytes, matches)
-		if err != nil {
-			return nil, err
+		packs, err := r.readIndexFile(ctx, c, k)
+		if errors.Is(err, backend.ErrNotFound) {
+			continue // replaced meanwhile by a rotation or rebuild
 		}
-		if !matches(b) {
-			return nil, fmt.Errorf("%s: content does not match its name: %w", k, ErrCorrupt)
-		}
-		if !r.cfg.Insecure() {
-			if b, err = crypto.DecryptMetadata(r.metadata, indexPurpose, b); err != nil {
-				return nil, fmt.Errorf("%s: %w", k, err)
-			}
-		}
-		if b, err = c.Decompress(nil, b); err != nil {
-			return nil, fmt.Errorf("%s: %w", k, err)
-		}
-		packs, err := parseIndex(b)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", k, err)
-		}
-		for _, p := range packs {
-			x.add(p)
+		if err := fn(k, packs, err); err != nil {
+			return err
 		}
 	}
-	return x, nil
+	return nil
+}
+
+// readIndexFile reads, checks and decodes one index file.
+func (r *Repository) readIndexFile(ctx context.Context, c *compress.Compressor, k string) ([]packRecord, error) {
+	matches := func(b []byte) bool { return indexPrefix+PackID(blake3.Sum256(b)).String() == k }
+	b, err := r.cachedRead(ctx, k, indexMaxBytes, matches)
+	if err != nil {
+		return nil, err
+	}
+	if !matches(b) {
+		return nil, fmt.Errorf("%s: content does not match its name: %w", k, ErrCorrupt)
+	}
+	if !r.cfg.Insecure() {
+		if b, err = crypto.DecryptMetadata(r.metadata, indexPurpose, b); err != nil {
+			return nil, fmt.Errorf("%s: %w: %w", k, ErrCorrupt, err)
+		}
+	}
+	if b, err = c.Decompress(nil, b); err != nil {
+		return nil, fmt.Errorf("%s: %w: %w", k, ErrCorrupt, err)
+	}
+	packs, err := parseIndex(b)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w: %w", k, ErrCorrupt, err)
+	}
+	return packs, nil
 }

@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -40,6 +41,10 @@ func (a *app) execute(ctx context.Context, args []string) msg.ExitCode {
 	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return msg.ExitOK
+	}
+	var se *silentError
+	if errors.As(err, &se) {
+		return se.code // the command already reported the outcome
 	}
 
 	code, m := describe(ctx, err)
@@ -85,3 +90,11 @@ func (a *app) fallbackPrinter() *cliout.Printer {
 	}
 	return p
 }
+
+// silentError ends a command with an exit code after it has already
+// printed its result, such as check's --json report of problems.
+type silentError struct{ code msg.ExitCode }
+
+func (e *silentError) Error() string { return fmt.Sprintf("exit code %d", e.code) }
+
+func silentExit(code msg.ExitCode) error { return &silentError{code: code} }

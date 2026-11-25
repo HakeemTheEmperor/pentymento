@@ -97,11 +97,20 @@ Deduplication still works: chunk IDs are keyed hashes of plaintext, compared aga
 
 ## Read path (restore, verify, prune)
 
-Unlock a full slot → master key → open `keys/private` → private key → unwrap data keys → decrypt chunks and segments.
+Unlock a full slot → master key → open `keys/private` and every `keys/private-<n>` → the keyring → unwrap data keys with whichever key they are wrapped to → decrypt chunks and segments.
 
 ## Key rotation
 
-`pentym key rotate` generates a new key pair, re-wraps every data key in the index and every log segment's header to the new public key, and replaces `keys/private` and `keys/public`. Pack and segment ciphertext is never rewritten. Slots are unchanged, because they protect the master key, not the key pair.
+`pentym key rotate` generates a new key pair and re-wraps every data key to it. Pack and segment ciphertext is never rewritten. Slots are unchanged, because they protect the master key, not the key pair. In order, under the exclusive lock:
+
+1. the current `keys/private` is copied to `keys/private-<n>`, numbered from 000001;
+2. the new private key replaces `keys/private`, then the new public key replaces `keys/public`, so nothing is ever wrapped to a key that is not stored;
+3. each index file holding a data key not wrapped to the new key is replaced by a re-wrapped copy, written before the old file is deleted;
+4. each log segment whose header is not wrapped to the new key is rewritten with a re-wrapped header.
+
+An interrupted rotation leaves everything readable, and running it again finishes the work.
+
+**Previous private keys are kept.** A pack's trailer holds its data key wrapped to the key pair of the day, and packs are never rewritten (their name is the hash of their content). An index rebuilt from the trailers after a rotation therefore holds keys only a previous private key opens; readers try the current key first, then the previous ones, newest first. Keeping them adds no exposure: whoever holds a previous private key can already open those trailers.
 
 ## Threat model
 
@@ -123,7 +132,7 @@ Unlock a full slot → master key → open `keys/private` → private key → un
 ## Limitations
 
 - **Removing a slot** stops that way of unlocking. It cannot revoke access already gained: someone who learned that slot's secret may have copied the master key, so after a suspected slot compromise, rotate the key pair and treat the master key as exposed.
-- **Rotation re-wraps data keys but does not re-encrypt data.** Someone holding the old private key and an old copy of the index could still decrypt data written before the rotation.
+- **Rotation protects data written after it, not before.** It re-wraps data keys but does not re-encrypt data, and pack trailers keep each pack's data key wrapped to the key pair of the day: someone holding a previous private key can still decrypt data written before the rotation.
 - **Memory:** Go's garbage collector cannot guarantee that keys are wiped from memory; Pentymento zeroes the buffers it controls.
 - **Losing every full slot and the paper code** makes every backup unreadable, by design. `init` requires two full slots or one plus a paper code; `pentym key remove` refuses to remove the last full slot.
 - **`--insecure-test-mode`** creates an unencrypted repository for local development; it is refused for anything but a local path.

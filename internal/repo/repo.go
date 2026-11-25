@@ -42,7 +42,10 @@ type Repository struct {
 	metadata crypto.Key
 	chunkID  crypto.Key
 	public   crypto.PublicKey
-	private  crypto.PrivateKey // zero for an agent unlock
+	// keys are the private keys, current first; empty for an agent unlock.
+	keys crypto.Keyring
+	// badKeys are replaced private keys that did not open.
+	badKeys []string
 
 	cache *Cache // nil: no local cache
 
@@ -143,7 +146,10 @@ func (r *Repository) Config() Config { return r.cfg }
 func (r *Repository) Backend() backend.Backend { return r.be }
 
 // Unlock loads the keys a slot unlocked: the metadata and chunk-ID keys,
-// the current public key and, for a full slot, the private key.
+// the current public key and, for a full slot, the private keys (the
+// current one and those key rotation replaced). A previous key that does
+// not open is skipped and reported by BadPreviousKeys, so the repository
+// stays usable while check reports it.
 func (r *Repository) Unlock(ctx context.Context, u crypto.Unlocked) error {
 	if r.cfg.Insecure() {
 		return nil
@@ -156,20 +162,52 @@ func (r *Repository) Unlock(ctx context.Context, u crypto.Unlocked) error {
 	if err != nil {
 		return fmt.Errorf("the slot's keys do not match this repository: %w", err)
 	}
-	var priv crypto.PrivateKey
+	var ring crypto.Keyring
+	var bad []string
 	if u.Scope == crypto.ScopeFull {
 		kb, err := readAll(ctx, r.be, privateKeyObject, 4096)
 		if err != nil {
 			return fmt.Errorf("read the private key: %w", err)
 		}
-		if priv, err = crypto.OpenPrivate(u.Master, kb); err != nil {
+		priv, err := crypto.OpenPrivate(u.Master, kb)
+		if err != nil {
 			return fmt.Errorf("open the private key: %w", err)
+		}
+		ring = crypto.Keyring{priv}
+		if ring, bad, err = r.loadPreviousKeys(ctx, u.Master, ring); err != nil {
+			return err
 		}
 	}
 	r.unlocked, r.scope = true, u.Scope
-	r.metadata, r.chunkID, r.public, r.private = u.Metadata, u.ChunkID, pub, priv
+	r.metadata, r.chunkID, r.public, r.keys, r.badKeys = u.Metadata, u.ChunkID, pub, ring, bad
 	return nil
 }
+
+// loadPreviousKeys appends the replaced private keys to ring, newest first.
+func (r *Repository) loadPreviousKeys(ctx context.Context, master crypto.Key, ring crypto.Keyring) (crypto.Keyring, []string, error) {
+	keys, err := r.listKeys(ctx, previousKeysPrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	var bad []string
+	for i := len(keys) - 1; i >= 0; i-- {
+		b, err := readAll(ctx, r.be, keys[i], 4096)
+		if err != nil {
+			return nil, nil, err
+		}
+		priv, err := crypto.OpenPrivate(master, b)
+		if err != nil {
+			bad = append(bad, keys[i])
+			continue
+		}
+		ring = append(ring, priv)
+	}
+	return ring, bad, nil
+}
+
+// BadPreviousKeys lists the replaced private keys that did not open after
+// a full unlock; data wrapped to them cannot be read.
+func (r *Repository) BadPreviousKeys() []string { return r.badKeys }
 
 // CanRead reports whether the repository was unlocked with a full slot (or
 // is unencrypted), so data can be decrypted.

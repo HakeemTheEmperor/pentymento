@@ -97,6 +97,9 @@ func (c *chunkReader) read(ctx context.Context, id chunker.ID) ([]byte, error) {
 		return nil, fmt.Errorf("chunk %s is not in the index: %w", id, ErrCorrupt)
 	}
 	rc, err := c.r.be.Get(ctx, packKey(loc.Pack), &backend.Range{Offset: int64(loc.Offset), Length: int64(loc.Length)})
+	if errors.Is(err, backend.ErrInvalidRange) {
+		return nil, fmt.Errorf("chunk %s in pack %s: the pack is shorter than the index says: %w: %w", id, loc.Pack, ErrCorrupt, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("chunk %s in pack %s: %w", id, loc.Pack, err)
 	}
@@ -105,6 +108,11 @@ func (c *chunkReader) read(ctx context.Context, id chunker.ID) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return c.decode(id, loc, wrapped, sealed)
+}
+
+// decode decrypts, decompresses and checks one stored chunk.
+func (c *chunkReader) decode(id chunker.ID, loc Location, wrapped, sealed []byte) ([]byte, error) {
 	if len(sealed) != int(loc.Length) {
 		return nil, fmt.Errorf("chunk %s in pack %s is truncated: %w", id, loc.Pack, ErrCorrupt)
 	}
@@ -133,7 +141,7 @@ func (c *chunkReader) dataKey(pack PackID, wrapped []byte) (crypto.Key, error) {
 	if k, ok := c.keys[pack]; ok {
 		return k, nil
 	}
-	k, err := crypto.UnwrapKey(c.r.private, wrapped)
+	k, _, err := c.r.keys.Unwrap(wrapped)
 	if err != nil {
 		return crypto.Key{}, fmt.Errorf("pack %s data key: %w: %w", pack, ErrCorrupt, err)
 	}

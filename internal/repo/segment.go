@@ -171,7 +171,7 @@ func (r *Repository) GetSegment(ctx context.Context, key string) ([]byte, error)
 		return nil, err
 	}
 	if !r.cfg.Insecure() {
-		if b, err = crypto.OpenObject(r.private, key, b); err != nil {
+		if b, err = r.keys.OpenObject(key, b); err != nil {
 			return nil, fmt.Errorf("%s: %w: %w", key, ErrCorrupt, err)
 		}
 	}

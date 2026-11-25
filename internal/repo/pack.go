@@ -47,7 +47,7 @@ func (p PackID) String() string { return hex.EncodeToString(p[:]) }
 // packKey returns the pack's object key, fanned out by its first byte.
 func packKey(id PackID) string {
 	s := id.String()
-	return "data/" + s[:2] + "/" + s
+	return dataPrefix + s[:2] + "/" + s
 }
 
 // Entry locates one chunk inside a pack.

@@ -37,6 +37,11 @@ IDs are permanent: an ID is never reused and never changes meaning.
 | [PTM-4003](PTM-4003.md) | insecure-test-mode-remote |
 | [PTM-4004](PTM-4004.md) | no-unlock-secret |
 | [PTM-4005](PTM-4005.md) | too-few-key-slots |
+| [PTM-4006](PTM-4006.md) | one-full-key-slot |
+| [PTM-7001](PTM-7001.md) | object-missing |
+| [PTM-7002](PTM-7002.md) | object-corrupt |
+| [PTM-7003](PTM-7003.md) | pack-unindexed |
+| [PTM-7004](PTM-7004.md) | object-stray |
 
 ## Page template
 

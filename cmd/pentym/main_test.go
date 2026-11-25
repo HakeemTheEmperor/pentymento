@@ -124,11 +124,15 @@ func stubArgs(c *cobra.Command) []string {
 // implemented lists the commands that are built; every other command is a
 // stub.
 var implemented = map[string]bool{
-	"pentym init":       true,
-	"pentym key add":    true,
-	"pentym key list":   true,
-	"pentym key remove": true,
-	"pentym key export": true,
+	"pentym check":              true,
+	"pentym key rotate":         true,
+	"pentym repo upgrade":       true,
+	"pentym repo rebuild-index": true,
+	"pentym init":               true,
+	"pentym key add":            true,
+	"pentym key list":           true,
+	"pentym key remove":         true,
+	"pentym key export":         true,
 }
 
 func TestStubsAreNotImplemented(t *testing.T) {
