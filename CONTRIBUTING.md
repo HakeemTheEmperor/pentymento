@@ -118,7 +118,8 @@ make lint
 | `make leaktest` | Secret-leak tests: known fake secrets must never appear in any output |
 | `make commits` | Commit-message and DCO check over `RANGE` |
 | `make messages` | Message-ID registry check against `BASE` |
-| `make licenses` | Dependency licence check (`go-licenses`) |
+| `make benchstat OLD=<file> NEW=<file>` | Compare two benchmark runs; time regressions over 10% are flagged |
+| `make licenses` | Dependency licence check (`go-licenses`); a dependency under another licence needs the maintainer's approval and is listed by name in `LICENSE_EXCEPTIONS` in the `Makefile` |
 | `make vulncheck` | Known vulnerabilities (`govulncheck`) |
 | `make gosec` | Security static analysis (`gosec`) |
 
