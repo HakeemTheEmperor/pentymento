@@ -18,6 +18,7 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/backend/local"
 	"github.com/HakeemTheEmperor/pentymento/internal/crypto"
 	"github.com/HakeemTheEmperor/pentymento/internal/devtools/leaktest"
+	"github.com/HakeemTheEmperor/pentymento/internal/lock"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
 	"github.com/HakeemTheEmperor/pentymento/internal/secrets"
 )
@@ -466,5 +467,40 @@ func TestKeySafe(t *testing.T) {
 		if got := keySafe(in); got != want {
 			t.Errorf("keySafe(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestCheckpointFencing: once another agent holds a newer lease generation,
+// the old holder's checkpoint is refused.
+func TestCheckpointFencing(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	tid, _ := f.repo.TargetID("prod-pg")
+	old := lock.NewLease(f.be, tid, lock.Holder{Host: "old"}, nil, lock.DefaultLeaseTimings)
+	if err := old.Tick(ctx); err != nil || !old.MayCapture() || old.Generation() != 1 {
+		t.Fatalf("first holder: %v, generation %d", err, old.Generation())
+	}
+	if err := f.repo.PutCheckpoint(ctx, Checkpoint{Target: tid, Generation: 1, Seq: 1, Position: "0/100"}); err != nil {
+		t.Fatalf("holder's checkpoint: %v", err)
+	}
+	// The holder releases (or is taken over); a new agent gets generation 2.
+	if err := old.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	next := lock.NewLease(f.be, tid, lock.Holder{Host: "new"}, nil, lock.DefaultLeaseTimings)
+	if err := next.Tick(ctx); err != nil || next.Generation() != 2 {
+		t.Fatalf("second holder: %v, generation %d", err, next.Generation())
+	}
+	// The old agent, waking late, tries to write a checkpoint.
+	err := f.repo.PutCheckpoint(ctx, Checkpoint{Target: tid, Generation: 1, Seq: 2, Position: "0/900"})
+	if !errors.Is(err, ErrFenced) {
+		t.Fatalf("stale checkpoint = %v, want ErrFenced", err)
+	}
+	if err := f.repo.PutCheckpoint(ctx, Checkpoint{Target: tid, Generation: 2, Seq: 1, Position: "0/200"}); err != nil {
+		t.Fatalf("new holder's checkpoint: %v", err)
+	}
+	c, _ := f.repo.LatestCheckpoint(ctx, tid)
+	if c.Generation != 2 || c.Position != "0/200" {
+		t.Errorf("latest checkpoint = %+v", c)
 	}
 }

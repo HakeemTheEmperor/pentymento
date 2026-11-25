@@ -6,10 +6,12 @@ package repo
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/backend"
+	"github.com/HakeemTheEmperor/pentymento/internal/lock"
 )
 
 // Objects that change over time are never rewritten: each change is a new
@@ -70,9 +72,23 @@ type Checkpoint struct {
 	Time     time.Time `json:"time"`
 }
 
-// PutCheckpoint writes a checkpoint. Its key sorts by generation and then
-// sequence, so the newest checkpoint of the newest lease is last.
+// ErrFenced means a checkpoint was written with an older capture-lease
+// generation than the target's current lease: another agent has taken
+// over, so this one must stop capturing.
+var ErrFenced = errors.New("checkpoint refused: a newer capture lease exists, so this agent no longer holds the target")
+
+// PutCheckpoint writes a checkpoint carrying the writer's lease generation.
+// It is refused with ErrFenced when a newer generation exists (SDD 7.2).
+// Even a write that slips past the check is harmless: keys sort by
+// generation, so the newest lease's checkpoints always come last.
 func (r *Repository) PutCheckpoint(ctx context.Context, c Checkpoint) error {
+	current, err := lock.CurrentGeneration(ctx, r.be, c.Target)
+	if err != nil {
+		return err
+	}
+	if c.Generation < current {
+		return fmt.Errorf("%w (checkpoint generation %d, lease generation %d)", ErrFenced, c.Generation, current)
+	}
 	return r.putMeta(ctx, checkpointKey(c.Target, c.Generation, c.Seq), c, backend.PutOptions{IfNotExists: true})
 }
 

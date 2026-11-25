@@ -29,6 +29,7 @@ IDs are permanent: an ID is never reused and never changes meaning.
 | [PTM-3001](PTM-3001.md) | repository-format-newer |
 | [PTM-3002](PTM-3002.md) | repository-not-found |
 | [PTM-3003](PTM-3003.md) | repository-exists |
+| [PTM-3004](PTM-3004.md) | repository-locked |
 | [PTM-4001](PTM-4001.md) | key-slot-unlock-failed |
 | [PTM-4002](PTM-4002.md) | last-full-slot |
 | [PTM-4003](PTM-4003.md) | insecure-test-mode-remote |
