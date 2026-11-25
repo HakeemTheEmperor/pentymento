@@ -28,7 +28,7 @@ BASE ?= origin/main
 # with it.
 RACE ?= $(if $(filter 1,$(shell $(GO) env CGO_ENABLED)),-race,)
 
-.PHONY: test test-integration bench lint commits messages licenses vulncheck gosec
+.PHONY: test test-integration bench lint leaktest commits messages licenses vulncheck gosec
 
 ## test: unit tests (no Docker needed)
 test:
@@ -50,6 +50,11 @@ lint:
 	$(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
 	$(GO) run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) -tags $(TAGS) ./...
 	$(GO) run ./internal/devtools/headercheck
+
+## leaktest: secret-leak tests: run pentym with known fake secrets and scan
+## every output for them (tests named TestSecretLeak...)
+leaktest:
+	$(GO) test $(RACE) -count=1 -run 'SecretLeak' ./...
 
 ## commits: commit-message and DCO check over RANGE
 commits:

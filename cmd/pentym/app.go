@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/cliout"
+	"github.com/HakeemTheEmperor/pentymento/internal/config"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
 )
 
@@ -31,6 +32,7 @@ type options struct {
 	debug     bool
 	logFormat string
 	version   bool
+	config    string
 }
 
 // app holds the process streams, the global flags and, once the flags are
@@ -81,6 +83,18 @@ func (a *app) setup(cmd *cobra.Command) error {
 	}
 	a.printer = p
 	return nil
+}
+
+// configPath is the config file to use: --config, else $PENTYM_CONFIG,
+// else the system location.
+func (a *app) configPath() string {
+	return config.Path(a.opts.config, a.getenv)
+}
+
+// loadConfig loads the config file with environment overrides from environ
+// (as from os.Environ).
+func (a *app) loadConfig(environ []string) (*config.Config, error) {
+	return config.Load(a.configPath(), environ)
 }
 
 // usageError is a wrong command, flag or argument (exit code 2).
