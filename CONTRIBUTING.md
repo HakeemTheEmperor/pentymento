@@ -93,6 +93,10 @@ IDs are permanent. Never remove, renumber or rename an entry; mark an unused one
 make messages
 ```
 
+## Secrets
+
+Secrets live in the config only as references and are resolved with `internal/secrets` at the moment of use. Hold resolved values in a `secrets.Secret`, which prints `[redacted]` everywhere, pass driver errors through `secrets.ScrubError` before showing or logging them, and never put a secret in a command-line argument. The secret-leak tests (`make leaktest`) feed known fake secrets through pentym and scan every output; when you add a command or an output path, add it to a `TestSecretLeak…` test with the helpers in `internal/devtools/leaktest`.
+
 Exit codes are listed in `docs/reference/exit-codes.md` and defined in `internal/msg/exitcode.go`. They never change number or meaning; add a new code instead.
 
 ## Building and testing
@@ -111,6 +115,7 @@ make lint
 | `make test-integration` | Unit tests plus database integration tests (needs Docker) |
 | `make bench` | Microbenchmarks |
 | `make lint` | `go vet`, `golangci-lint`, `staticcheck` and the licence-header check |
+| `make leaktest` | Secret-leak tests: known fake secrets must never appear in any output |
 | `make commits` | Commit-message and DCO check over `RANGE` |
 | `make messages` | Message-ID registry check against `BASE` |
 | `make licenses` | Dependency licence check (`go-licenses`) |
@@ -129,7 +134,7 @@ PENTYM_TEST_POSTGRES=17 PENTYM_TEST_MONGODB=8.0 make test-integration
 
 | Pipeline | Runs | When |
 | --- | --- | --- |
-| `pr` | Lint, unit tests with `-race` on Linux, macOS and Windows, commits and DCO, message IDs, licences, `govulncheck`, `gosec`, integration on Postgres 17 and MongoDB 8.0, benchmarks | Every pull request to `main` |
+| `pr` | Lint, unit tests with `-race` on Linux, macOS and Windows, commits and DCO, secret leak, message IDs, licences, `govulncheck`, `gosec`, integration on Postgres 17 and MongoDB 8.0, benchmarks | Every pull request to `main` |
 | `nightly` | Integration on every supported Postgres and MongoDB version | Daily at 02:00 UTC, or by hand |
 | `release` | Release gates | Pushing a `v*` tag |
 

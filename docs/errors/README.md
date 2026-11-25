@@ -16,7 +16,16 @@ IDs are permanent: an ID is never reused and never changes meaning.
 | 8xxx | Agent and lease |
 | 9xxx | Notifications |
 
-No message IDs are registered yet.
+| ID | Name |
+| --- | --- |
+| [PTM-1001](PTM-1001.md) | plaintext-secret-rejected |
+| [PTM-1002](PTM-1002.md) | plaintext-secret-file-readable |
+| [PTM-1003](PTM-1003.md) | config-invalid |
+| [PTM-1004](PTM-1004.md) | secret-env-unset |
+| [PTM-1005](PTM-1005.md) | secret-file-unreadable |
+| [PTM-1006](PTM-1006.md) | secret-keychain-missing |
+| [PTM-1007](PTM-1007.md) | secret-command-failed |
+| [PTM-1008](PTM-1008.md) | config-not-found |
 
 ## Page template
 

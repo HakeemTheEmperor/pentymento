@@ -5,9 +5,12 @@ package main
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/HakeemTheEmperor/pentymento/internal/config"
 )
 
 // rootCommand builds the command tree (PRD 7.15). Commands that are not
@@ -48,6 +51,7 @@ func (a *app) rootCommand() *cobra.Command {
 	pf.BoolVarP(&a.opts.verbose, "verbose", "v", false, "print more detail, such as message IDs")
 	pf.BoolVar(&a.opts.debug, "debug", false, "print the structured debug log to stderr")
 	pf.StringVar(&a.opts.logFormat, "log-format", "", "log format: text or json (default: text in a terminal, json otherwise)")
+	pf.StringVar(&a.opts.config, "config", "", "config file (default: $PENTYM_CONFIG, else "+config.DefaultPath(runtime.GOOS, a.getenv)+")")
 	root.Flags().BoolVar(&a.opts.version, "version", false, "print the version")
 
 	root.AddCommand(

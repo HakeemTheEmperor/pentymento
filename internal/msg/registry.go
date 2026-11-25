@@ -43,7 +43,16 @@ func (e Entry) DocsURL() string { return DocsBaseURL + string(e.ID) }
 // Name fields, because internal/devtools/msgcheck reads this file's source
 // to compare it with earlier versions. Every ID needs a troubleshooting
 // entry at docs/errors/<ID>.md.
-var entries = []Entry{}
+var entries = []Entry{
+	{ID: "PTM-1001", Name: "plaintext-secret-rejected"},
+	{ID: "PTM-1002", Name: "plaintext-secret-file-readable"},
+	{ID: "PTM-1003", Name: "config-invalid"},
+	{ID: "PTM-1004", Name: "secret-env-unset"},
+	{ID: "PTM-1005", Name: "secret-file-unreadable"},
+	{ID: "PTM-1006", Name: "secret-keychain-missing"},
+	{ID: "PTM-1007", Name: "secret-command-failed"},
+	{ID: "PTM-1008", Name: "config-not-found"},
+}
 
 // Lookup returns the registry entry for an ID.
 func Lookup(id ID) (Entry, bool) {
