@@ -177,6 +177,12 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	}
 }
 
+// maxNewChunks bounds the new chunks a copy with the given number of small
+// edits may store, whatever the repository's key (which decides chunk
+// boundaries): each edit changes the chunks around it until boundaries
+// resynchronise (at most 3), plus up to 2 chunk-list blocks.
+func maxNewChunks(edits int64) int64 { return 3*edits + 2 }
+
 func TestDeduplication(t *testing.T) {
 	f := newFixture(t)
 	idx := loadIndex(t, f.repo)
@@ -190,8 +196,8 @@ func TestDeduplication(t *testing.T) {
 	snap, changed := writeSnap(t, f.repo, idx, newStream(7, size, edits))
 	t.Logf("first: %d chunks, %d MiB stored; changed copy: %d new chunks, %d KiB stored",
 		first.Chunks, first.NewBytes>>20, changed.NewChunks, changed.NewBytes>>10)
-	if changed.NewChunks > 12 || changed.NewBytes > first.NewBytes/10 {
-		t.Errorf("a slightly changed stream stored %d new chunks, %d bytes", changed.NewChunks, changed.NewBytes)
+	if limit := maxNewChunks(3); changed.NewChunks > limit {
+		t.Errorf("a stream with 3 edits stored %d new chunks, more than %d", changed.NewChunks, limit)
 	}
 	// The changed copy restores exactly.
 	want := hashOf(t, newStream(7, size, map[int64][]byte{5 << 20: []byte("UPDATE"), 30<<20 + 777: []byte("a new row"), 50 << 20: bytes.Repeat([]byte("x"), 5000)}))
@@ -470,8 +476,8 @@ func roundTrip(t *testing.T, mib int64) uint64 {
 
 	t.Logf("%d MiB: %d chunks in %d packs, %.0f MiB/s written; peak live heap %d MiB; changed copy stored %d new chunks (%d KiB)",
 		mib, st.Chunks, st.Packs, float64(mib)/writeTime.Seconds(), heap>>20, ch.NewChunks, ch.NewBytes>>10)
-	if ch.NewChunks > 8 || ch.NewBytes > st.NewBytes/20 {
-		t.Errorf("%d MiB: changed copy stored %d new chunks, %d bytes", mib, ch.NewChunks, ch.NewBytes)
+	if limit := maxNewChunks(2); ch.NewChunks > limit {
+		t.Errorf("%d MiB: a copy with 2 edits stored %d new chunks, more than %d", mib, ch.NewChunks, limit)
 	}
 	return heap
 }

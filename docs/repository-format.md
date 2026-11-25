@@ -12,6 +12,9 @@ keys/public                                  the public key, sealed with the met
 snapshots/<id>                               a committed snapshot
 index/<hash>                                 index files
 data/<xx>/<hash>                             packs of encrypted chunks
+wal/<target-id>/<timeline>/<segment>…        Postgres WAL segments
+wal/<target-id>/<timeline>.history.zst.enc   Postgres timeline history files
+oplog/<target-id>/<first>-<last>.zst.enc     MongoDB oplog batches
 targets/<target-id>/info                     the target's name and engine
 targets/<target-id>/checkpoints/<gen>-<seq>  capture checkpoints
 events/<target-id>/<time>-<rand>             destructive events
@@ -180,4 +183,24 @@ To read a snapshot: for each list block, read the block chunk; for each 32-byte 
 ### Commit order
 
 A snapshot is committed only after its stream ends and the process that produced it exits cleanly: the last pack and its index file are written first, the snapshot object last, with conditional create. A failed or cancelled backup leaves only packs that no snapshot references, which a later prune removes once they are older than the safety margin.
+
+## Log segments
+
+Captured WAL and oplog are stored as individual objects, so recovery reads them in order and each can expire on its own. Each object is compressed as a whole (the chunk header byte, then one zstd frame; stored raw when that saves less than 3%) and then sealed with its own data key, wrapped to the public key and carried in the object's header (see "Sealed objects" in crypto.md), bound to its object key. A segment holds at most 64 MiB before compression.
+
+| Object | Key |
+| --- | --- |
+| Complete WAL segment | `wal/<target-id>/<timeline>/<segment>.zst.enc` |
+| Partial WAL segment | `wal/<target-id>/<timeline>/<segment>.partial-<end-lsn>.zst.enc` |
+| Timeline history | `wal/<target-id>/<timeline>.history.zst.enc` |
+| Oplog batch | `oplog/<target-id>/<first>-<last>.zst.enc` |
+
+- `<timeline>` is the Postgres timeline as 8 uppercase hexadecimal digits, and `<segment>` the 24-character Postgres segment file name, such as `000000010000000000000003`.
+- A partial segment holds WAL up to `<end-lsn>`, 16 uppercase hexadecimal digits, so successive partials of one segment are distinct objects; prune removes those a later partial or the complete segment supersedes.
+- An oplog batch is named by its first and last entries' timestamps, each written `<seconds>.<increment>` with 10 zero-padded digits per part, so keys sort by time.
+- Storing a segment that already exists succeeds: a resent segment after a crash is a harmless duplicate.
+
+## Local metadata cache
+
+Not part of the repository: pentym keeps a disposable copy of immutable objects (index files and snapshots) in the user's cache directory, under `pentym/<repository ID>/`, to save requests. Objects are cached exactly as stored, still encrypted. A cached index file is used only if it matches its hash name, and a cached snapshot only if it decrypts; anything else is fetched again. Deleting the cache is always safe.
 

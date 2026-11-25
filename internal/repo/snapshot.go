@@ -336,10 +336,13 @@ func (r *Repository) Snapshots(ctx context.Context) ([]Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	if r.cache != nil {
+		r.cache.retain(snapshotsPrefix, keys)
+	}
 	out := make([]Snapshot, 0, len(keys))
 	for _, k := range keys {
 		var s Snapshot
-		if err := r.getMeta(ctx, k, &s); err != nil {
+		if err := r.getMetaCached(ctx, k, &s); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -353,7 +356,7 @@ func (r *Repository) LoadSnapshot(ctx context.Context, id string) (*Snapshot, er
 		return nil, fmt.Errorf("snapshot ID %q is malformed", id)
 	}
 	var s Snapshot
-	if err := r.getMeta(ctx, snapshotKey(id), &s); err != nil {
+	if err := r.getMetaCached(ctx, snapshotKey(id), &s); err != nil {
 		return nil, err
 	}
 	return &s, nil

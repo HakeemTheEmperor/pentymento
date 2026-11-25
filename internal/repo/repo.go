@@ -44,6 +44,8 @@ type Repository struct {
 	public   crypto.PublicKey
 	private  crypto.PrivateKey // zero for an agent unlock
 
+	cache *Cache // nil: no local cache
+
 	// Now is the clock; tests replace it.
 	Now func() time.Time
 }
@@ -274,6 +276,30 @@ func (r *Repository) getMeta(ctx context.Context, key string, v any) error {
 	if err != nil {
 		return err
 	}
+	return r.decodeMeta(key, b, v)
+}
+
+// getMetaCached is getMeta for immutable objects, through the local cache.
+// A cached copy is used only if it decrypts.
+func (r *Repository) getMetaCached(ctx context.Context, key string, v any) error {
+	if !r.cfg.Insecure() && !r.unlocked {
+		return ErrLocked
+	}
+	b, err := r.cachedRead(ctx, key, maxMetadataSize, func(b []byte) bool {
+		if r.cfg.Insecure() {
+			return json.Valid(b)
+		}
+		_, err := crypto.DecryptMetadata(r.metadata, key, b)
+		return err == nil
+	})
+	if err != nil {
+		return err
+	}
+	return r.decodeMeta(key, b, v)
+}
+
+func (r *Repository) decodeMeta(key string, b []byte, v any) error {
+	var err error
 	if !r.cfg.Insecure() {
 		if !r.unlocked {
 			return ErrLocked

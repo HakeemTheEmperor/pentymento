@@ -200,14 +200,18 @@ func (r *Repository) LoadIndex(ctx context.Context) (*Index, error) {
 		return nil, err
 	}
 	defer func() { _ = c.Close() }()
+	if r.cache != nil {
+		r.cache.retain(indexPrefix, keys)
+	}
 	x := newIndex()
 	for _, k := range keys {
-		b, err := readAll(ctx, r.be, k, indexMaxBytes)
+		matches := func(b []byte) bool { return indexPrefix+PackID(blake3.Sum256(b)).String() == k }
+		b, err := r.cachedRead(ctx, k, indexMaxBytes, matches)
 		if err != nil {
 			return nil, err
 		}
-		if sum := blake3.Sum256(b); indexPrefix+PackID(sum).String() != k {
-			return nil, fmt.Errorf("%s: content does not match its name", k)
+		if !matches(b) {
+			return nil, fmt.Errorf("%s: content does not match its name: %w", k, ErrCorrupt)
 		}
 		if !r.cfg.Insecure() {
 			if b, err = crypto.DecryptMetadata(r.metadata, indexPurpose, b); err != nil {
