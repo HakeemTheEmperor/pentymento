@@ -116,17 +116,20 @@ func head(t *testing.T, e *Engine, tg engine.Target) engine.Position {
 // against each segment's bounds.
 type captured struct {
 	ts      []bson.Timestamp
+	bytes   int
 	inserts map[string]int // _id → count, for ns app.capture
+	updates map[string]int // _id → count, for ns app.capture
 }
 
 func readSegments(t *testing.T, segs []engine.Segment) captured {
 	t.Helper()
-	c := captured{inserts: map[string]int{}}
+	c := captured{inserts: map[string]int{}, updates: map[string]int{}}
 	for n, s := range segs {
 		if s.Kind != "oplog" || s.Checkpoint != s.Last {
 			t.Fatalf("segment %d: %+v", n, s)
 		}
 		rest := s.Data
+		c.bytes += len(s.Data)
 		entries := 0
 		for len(rest) > 0 {
 			doc, r, ok := bsonDoc(rest)
@@ -148,6 +151,7 @@ func readSegments(t *testing.T, segs []engine.Segment) captured {
 			}
 			c.ts = append(c.ts, ts)
 			collectInserts(raw, c.inserts)
+			collectUpdates(raw, c.updates)
 			entries++
 		}
 		if Position(c.ts[len(c.ts)-1]) != s.Last {
@@ -177,6 +181,17 @@ func collectInserts(op bson.Raw, into map[string]int) {
 					collectInserts(d, into)
 				}
 			}
+		}
+	}
+}
+
+// collectUpdates counts updates in app.capture, by _id.
+func collectUpdates(op bson.Raw, into map[string]int) {
+	ns, _ := op.Lookup("ns").StringValueOK()
+	kind, _ := op.Lookup("op").StringValueOK()
+	if kind == "u" && ns == "app.capture" {
+		if id, ok := op.Lookup("o2", "_id").StringValueOK(); ok {
+			into[id]++
 		}
 	}
 }
@@ -232,7 +247,14 @@ func TestOplogCapture(t *testing.T) {
 
 			sink := &logSink{}
 			stop, _ := capture(t, e, tg, from, sink)
-			ids := s.insert(t, "a", 25000, 8) // over 2 batches by count, and over 16 MiB
+			ids := s.insert(t, "a", 25000, 8) // over 16 MiB
+			// Some versions log a multi-document insert as a few applyOps
+			// entries; a multi-document update is logged one entry per
+			// document, so this makes over 2 batches by count.
+			if _, err := s.admin.Database("app").Collection("capture").UpdateMany(context.Background(),
+				bson.D{}, bson.D{{Key: "$set", Value: bson.D{{Key: "seen", Value: true}}}}); err != nil {
+				t.Fatal(err)
+			}
 			last := head(t, e, tg)
 			waitFor(t, "capture to store the inserts", 2*time.Minute, func() bool { return sink.reached(t, last) })
 			if err := stop(); err != nil {
@@ -249,10 +271,17 @@ func TestOplogCapture(t *testing.T) {
 					t.Fatalf("insert %s stored %d times", id, got.inserts[id])
 				}
 			}
-			if len(segs) < 3 {
-				t.Errorf("%d segments; the limits should have split the inserts into more", len(segs))
+			for _, id := range ids {
+				if got.updates[id] != 1 {
+					t.Fatalf("the update of %s stored %d times", id, got.updates[id])
+				}
 			}
-			t.Logf("%d entries in %d segments", len(got.ts), len(segs))
+			// The limits split what was stored into at least this many.
+			need := max((len(got.ts)+BatchEntries-1)/BatchEntries, (got.bytes+BatchBytes-1)/BatchBytes)
+			if len(segs) < need || need < 3 {
+				t.Errorf("%d entries, %d bytes in %d segments; the limits need at least %d (and the test at least 3)", len(got.ts), got.bytes, len(segs), need)
+			}
+			t.Logf("%d entries, %d bytes in %d segments", len(got.ts), got.bytes, len(segs))
 
 			// Resume from the checkpoint: nothing before it again, nothing
 			// after it missed.
