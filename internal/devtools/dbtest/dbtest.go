@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -137,11 +138,25 @@ type MongoDB struct {
 // single-node replica set and stops it when the test finishes.
 func StartMongoDB(t testing.TB, version string) *MongoDB {
 	t.Helper()
+	return startReplicaSet(t, version)
+}
+
+// StartMongoDBSmallOplog starts a single-node replica set like StartMongoDB
+// whose oplog holds only about sizeMB megabytes, so tests can make it roll
+// over.
+func StartMongoDBSmallOplog(t testing.TB, version string, sizeMB int) *MongoDB {
+	t.Helper()
+	return startReplicaSet(t, version, testcontainers.WithCmdArgs("--oplogSize", strconv.Itoa(sizeMB)))
+}
+
+func startReplicaSet(t testing.TB, version string, opts ...testcontainers.ContainerCustomizer) *MongoDB {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
 
-	c, err := tcmongodb.Run(ctx, "mongo:"+version, tcmongodb.WithReplicaSet(replicaSetName),
-		tcmongodb.WithUsername("root"), tcmongodb.WithPassword(randomPassword(t)))
+	opts = append([]testcontainers.ContainerCustomizer{tcmongodb.WithReplicaSet(replicaSetName),
+		tcmongodb.WithUsername("root"), tcmongodb.WithPassword(randomPassword(t))}, opts...)
+	c, err := tcmongodb.Run(ctx, "mongo:"+version, opts...)
 	testcontainers.CleanupContainer(t, c)
 	if err != nil {
 		t.Fatalf("start mongo:%s: %v", version, err)

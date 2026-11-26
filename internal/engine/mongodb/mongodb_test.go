@@ -257,7 +257,7 @@ func TestConnectError(t *testing.T) {
 		{errors.New("server selection error: context deadline exceeded (mongodb://u:hunter2-secret@db)"), msg.ExitConnect},
 	} {
 		var me *msg.Error
-		err := connectError(tg, tt.err, pw)
+		err := connectError(tg, "pentym_backup", tt.err, pw)
 		if !errors.As(err, &me) || me.Message.ID != IDConnect || me.Code != tt.code || me.Message.Fact != "cannot connect to MongoDB as pentym_backup" {
 			t.Errorf("connectError(%v) = %+v", tt.err, me)
 		}
