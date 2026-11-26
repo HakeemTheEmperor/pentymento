@@ -124,6 +124,8 @@ func stubArgs(c *cobra.Command) []string {
 // implemented lists the commands that are built; every other command is a
 // stub.
 var implemented = map[string]bool{
+	"pentym backup":             true,
+	"pentym list":               true,
 	"pentym check":              true,
 	"pentym doctor":             true,
 	"pentym key rotate":         true,
@@ -223,7 +225,7 @@ func TestUsageErrors(t *testing.T) {
 }
 
 func TestJSONError(t *testing.T) {
-	r := pentym(t, "--json", "backup", "prod-pg")
+	r := pentym(t, "--json", "restore", "prod-pg")
 	if r.code != msg.ExitNotImplemented {
 		t.Fatalf("exit code = %d", r.code)
 	}
@@ -236,7 +238,7 @@ func TestJSONError(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.stdout), &doc); err != nil {
 		t.Fatalf("stdout is not one JSON document: %v\n%s", err, r.stdout)
 	}
-	want := map[string]string{"message": "pentym backup is not implemented in this build", "next": "pentym --help"}
+	want := map[string]string{"message": "pentym restore is not implemented in this build", "next": "pentym --help"}
 	if len(doc.Error) != len(want) || doc.Error["message"] != want["message"] || doc.Error["next"] != want["next"] {
 		t.Errorf("error document = %v, want %v", doc.Error, want)
 	}
@@ -251,18 +253,18 @@ func TestJSONError(t *testing.T) {
 
 func TestOutputModes(t *testing.T) {
 	// ASCII fallback.
-	r := pentym(t, "--ascii", "list")
-	if r.stderr != "FAIL pentym list is not implemented in this build\n-> pentym --help\n" {
+	r := pentym(t, "--ascii", "status")
+	if r.stderr != "FAIL pentym status is not implemented in this build\n-> pentym --help\n" {
 		t.Errorf("--ascii stderr = %q", r.stderr)
 	}
 	// Forced colour on a non-terminal.
-	r = pentym(t, "--color=always", "list")
-	if r.stderr != "\x1b[31m✗\x1b[0m pentym list is not implemented in this build\n→ \x1b[1mpentym --help\x1b[0m\n" {
+	r = pentym(t, "--color=always", "status")
+	if r.stderr != "\x1b[31m✗\x1b[0m pentym status is not implemented in this build\n→ \x1b[1mpentym --help\x1b[0m\n" {
 		t.Errorf("--color=always stderr = %q", r.stderr)
 	}
 	// Quiet still shows errors.
-	r = pentym(t, "-q", "list")
-	if !strings.HasPrefix(r.stderr, "✗ pentym list") {
+	r = pentym(t, "-q", "status")
+	if !strings.HasPrefix(r.stderr, "✗ pentym status") {
 		t.Errorf("-q hid the error: %q", r.stderr)
 	}
 }

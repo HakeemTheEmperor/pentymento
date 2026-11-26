@@ -186,10 +186,15 @@ A snapshot's stream is a sequence of chunks. Its ordered list of chunk IDs is st
 | `start_position`, `end_position`, `timeline` | Where the base backup starts and ends in the engine's log (LSN and timeline, or oplog timestamps) |
 | `inventory` | The engine's object inventory, recorded at backup time, for verification |
 | `start`, `end` | When the backup ran |
-| `size`, `chunks` | The stream's length in bytes and number of chunks |
-| `list` | The chunk IDs of the chunk-list blocks, in order |
+| `size`, `chunks` | The main stream's length in bytes and number of chunks |
+| `list` | The chunk IDs of the main stream's chunk-list blocks, in order |
+| `name` | The main stream's name, such as `base.tar`; absent for a single unnamed stream |
+| `parts` | Further streams committed with the main one, each `{name, size, chunks, list}`: a Postgres backup's tablespace archives (`<oid>.tar`) and `backup_manifest`; absent when there are none |
+| `method`, `system_id` | How the engine took the backup (`native`, `pg_basebackup`) and the database cluster's system identifier |
 
 To read a snapshot: for each list block, read the block chunk; for each 32-byte ID in it, read that chunk; concatenate the chunks. Every chunk is checked against its ID after decryption and decompression.
+
+Each part is a stream of its own, read the same way from its own `list`. Parts are separate streams, not one stream with markers between archives, because markers at positions that shift with every change would defeat deduplication. A snapshot's streams are committed together: the snapshot object, written last, names them all.
 
 ### Commit order
 

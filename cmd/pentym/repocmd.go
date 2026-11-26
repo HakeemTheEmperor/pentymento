@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
+	"github.com/HakeemTheEmperor/pentymento/internal/ops"
 	"github.com/HakeemTheEmperor/pentymento/internal/repo"
 )
 
@@ -51,7 +52,7 @@ func (a *app) repoUpgradeCommand() *cobra.Command {
 			res := result{From: from, To: from, Steps: []string{}}
 			op := beginOp(r, "repo upgrade", cfg.Repository.Key)
 			outcome := repo.ResultOK
-			err = withLock(ctx, r, true, func() error {
+			err = ops.WithLock(ctx, r, true, func() error {
 				planFn := (*repo.Repository).UpgradePlan
 				if a.upgradePlan != nil {
 					planFn = a.upgradePlan
@@ -138,7 +139,7 @@ func (a *app) repoRebuildIndexCommand() *cobra.Command {
 			}
 			var stats *repo.RebuildStats
 			op := beginOp(r, "repo rebuild-index", cfg.Repository.Key)
-			err = withLock(ctx, r, true, func() error {
+			err = ops.WithLock(ctx, r, true, func() error {
 				var err error
 				stats, err = r.RebuildIndex(ctx)
 				return err
@@ -212,7 +213,7 @@ func (a *app) keyRotateCommand() *cobra.Command {
 			}
 			var stats *repo.RotateStats
 			op := beginOp(r, "key rotate", cfg.Repository.Key)
-			err = withLock(ctx, r, true, func() error {
+			err = ops.WithLock(ctx, r, true, func() error {
 				var err error
 				stats, err = r.RotateKeys(ctx, *keys)
 				return err

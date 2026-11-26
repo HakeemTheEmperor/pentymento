@@ -56,12 +56,12 @@ func (a *app) rootCommand() *cobra.Command {
 
 	root.AddCommand(
 		a.initCommand(),
-		backupCommand(),
+		a.backupCommand(),
 		agentCommand(),
 		catchUpCommand(),
 		restoreCommand(),
 		eventsCommand(),
-		listCommand(),
+		a.listCommand(),
 		statusCommand(),
 		verifyCommand(),
 		a.checkCommand(),
@@ -124,14 +124,6 @@ func group(use, short string, ex ...string) *cobra.Command {
 	}
 }
 
-func backupCommand() *cobra.Command {
-	c := stub("backup <target>", "Take a snapshot of a target now", args("<target>"),
-		"Take a snapshot of prod-pg", "pentym backup prod-pg",
-		"Take it through the running agent", "pentym backup prod-pg --now")
-	c.Flags().Bool("now", false, "run the backup through the running agent")
-	return c
-}
-
 func agentCommand() *cobra.Command {
 	c := stub("agent", "Run continuous capture and the scheduler", cobra.NoArgs,
 		"Run the agent in the foreground", "pentym agent",
@@ -175,11 +167,6 @@ func eventsCommand() *cobra.Command {
 		"List events on prod-pg in the last 2 hours", "pentym events prod-pg --since 2h")
 	c.Flags().String("since", "", "show events from this long ago, such as 2h")
 	return c
-}
-
-func listCommand() *cobra.Command {
-	return stub("list", "List snapshots and log coverage", args(),
-		"List snapshots and log coverage", "pentym list")
 }
 
 func statusCommand() *cobra.Command {

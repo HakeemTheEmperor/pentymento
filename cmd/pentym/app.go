@@ -50,6 +50,8 @@ type app struct {
 	interactive bool
 	// upgradePlan, set by tests, replaces the repository's upgrade plan.
 	upgradePlan func(*repo.Repository) ([]repo.Migration, error)
+	// engineFor, set by tests, replaces the engines.
+	engineFor engineFactory
 	// tel is the logging and metrics facade for one-shot commands: logs go
 	// to stderr, and only with --debug.
 	tel *telemetry.Telemetry

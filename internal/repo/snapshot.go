@@ -45,6 +45,38 @@ type Snapshot struct {
 	// List names the chunk-list blocks: the stream's chunk IDs, in order,
 	// stored through the chunk store so a snapshot of any size is small.
 	List []string `json:"list"`
+	// Name names the main stream, such as "base.tar"; empty for a single
+	// unnamed stream.
+	Name string `json:"name,omitempty"`
+	// Parts are further streams committed with the main one, each its own
+	// chunk stream: a Postgres backup's tablespace archives and manifest.
+	Parts []Part `json:"parts,omitempty"`
+	// Method is how the engine took the backup, such as "native".
+	Method string `json:"method,omitempty"`
+	// SystemID identifies the database cluster or replica set.
+	SystemID string `json:"system_id,omitempty"`
+}
+
+// Part is one further stream of a snapshot.
+type Part struct {
+	Name   string   `json:"name"`
+	Size   int64    `json:"size"`
+	Chunks int64    `json:"chunks"`
+	List   []string `json:"list"`
+}
+
+// TotalSize is the length of every stream together.
+func (s *Snapshot) TotalSize() int64 {
+	n := s.Size
+	for _, p := range s.Parts {
+		n += p.Size
+	}
+	return n
+}
+
+// streams returns every stream as a part: the main one first.
+func (s *Snapshot) streams() []Part {
+	return append([]Part{{Name: s.Name, Size: s.Size, Chunks: s.Chunks, List: s.List}}, s.Parts...)
 }
 
 // Chunk-list blocks hold 32-byte chunk IDs back to back. A block ends
@@ -106,35 +138,83 @@ func (s WriteStats) DedupRatio() float64 {
 //
 // idx is the repository's index (LoadIndex); it gains the new chunks.
 func (r *Repository) WriteSnapshot(ctx context.Context, idx *Index, src io.Reader, meta Snapshot, opts WriteOptions) (*Snapshot, WriteStats, error) {
-	if !r.unlocked {
-		return nil, WriteStats{}, ErrLocked
-	}
-	comp, err := compress.New(opts.Level, chunker.MaxSize)
+	sw, err := r.NewSnapshotWriter(ctx, idx, meta, opts)
 	if err != nil {
 		return nil, WriteStats{}, err
 	}
-	defer func() { _ = comp.Close() }()
-	key := r.chunkID.Array()
+	defer sw.Close()
+	if err := sw.WritePart(meta.Name, src); err != nil {
+		return nil, sw.w.stats, err
+	}
+	return sw.Commit()
+}
+
+// SnapshotWriter writes a snapshot of one or more streams (parts), such as
+// a Postgres backup's base.tar, tablespace archives and manifest. Each part
+// is its own chunk stream; the first is the snapshot's main stream. Nothing
+// is visible until Commit, which commits every part together. Close
+// releases the writer whether or not it committed.
+type SnapshotWriter struct {
+	r     *Repository
+	w     *snapWriter
+	comp  *compress.Compressor
+	meta  Snapshot
+	parts []Part
+	ctx   context.Context
+
+	committed, closed bool
+}
+
+// NewSnapshotWriter starts a snapshot described by meta. idx is the
+// repository's index (LoadIndex); it gains the new chunks.
+func (r *Repository) NewSnapshotWriter(ctx context.Context, idx *Index, meta Snapshot, opts WriteOptions) (*SnapshotWriter, error) {
+	if !r.unlocked {
+		return nil, ErrLocked
+	}
+	comp, err := compress.New(opts.Level, chunker.MaxSize)
+	if err != nil {
+		return nil, err
+	}
 	uploads := opts.Uploads
 	if uploads <= 0 {
 		uploads = 2
 	}
 	w := &snapWriter{
 		ctx: ctx, r: r, idx: idx, comp: comp, opts: opts,
-		hasher: chunker.NewHasher(key),
+		hasher: chunker.NewHasher(r.chunkID.Array()),
 		pack:   r.newPack(),
 		inPack: map[chunker.ID]bool{},
 		upload: make(chan struct{}, uploads),
 	}
 	meta.ID = randomHex(16)
 	meta.Start = r.now().UTC()
+	meta.Parts = nil
+	return &SnapshotWriter{r: r, w: w, comp: comp, meta: meta, ctx: ctx}, nil
+}
 
-	ch := chunker.New(src, chunker.NewTable(key))
-	workers := opts.Workers
+// WritePart streams one part through the chunk store. Parts are written
+// one after another; a part that fails leaves the snapshot uncommittable.
+func (sw *SnapshotWriter) WritePart(name string, src io.Reader) error {
+	if sw.committed || sw.closed {
+		return errors.New("snapshot writer already finished")
+	}
+	for _, p := range sw.parts {
+		if p.Name == name {
+			return fmt.Errorf("snapshot part %q written twice", name)
+		}
+	}
+	w := sw.w
+	if err := w.err(); err != nil {
+		return err
+	}
+	bytes0, chunks0 := w.stats.Bytes, w.stats.Chunks
+	w.listIDs, w.listBuf, w.listN = nil, w.listBuf[:0], 0
+	ch := chunker.New(src, chunker.NewTable(sw.r.chunkID.Array()))
+	workers := w.opts.Workers
 	if workers <= 0 {
 		workers = runtime.GOMAXPROCS(0)
 	}
-	err = workpool.Run(ctx, workers,
+	err := workpool.Run(sw.ctx, workers,
 		func() ([]byte, bool, error) {
 			c, err := ch.Next()
 			if errors.Is(err, io.EOF) {
@@ -149,29 +229,83 @@ func (r *Repository) WriteSnapshot(ctx context.Context, idx *Index, src io.Reade
 		w.addData,
 	)
 	if err == nil {
-		err = w.finish(ctx)
+		err = w.flushList()
 	}
+	if err != nil {
+		w.setErr(err)
+		return err
+	}
+	list := w.listIDs
+	if list == nil {
+		list = []string{}
+	}
+	sw.parts = append(sw.parts, Part{Name: name, Size: w.stats.Bytes - bytes0, Chunks: w.stats.Chunks - chunks0, List: list})
+	return nil
+}
+
+// Describe updates the snapshot record before Commit, with what is known
+// only once the stream has ended, such as its end position. The ID, start
+// time and streams cannot be changed.
+func (sw *SnapshotWriter) Describe(fn func(*Snapshot)) {
+	m := sw.meta
+	fn(&m)
+	m.ID, m.Start, m.Parts = sw.meta.ID, sw.meta.Start, nil
+	sw.meta = m
+}
+
+// Stats returns what has been written so far.
+func (sw *SnapshotWriter) Stats() WriteStats { return sw.w.stats }
+
+// Commit finishes the last pack, waits for the uploads, runs BeforeCommit,
+// then writes the index files and the snapshot object, in that order.
+func (sw *SnapshotWriter) Commit() (*Snapshot, WriteStats, error) {
+	w := sw.w
+	if sw.committed || sw.closed {
+		return nil, w.stats, errors.New("snapshot writer already finished")
+	}
+	if len(sw.parts) == 0 {
+		return nil, w.stats, errors.New("a snapshot needs at least one part")
+	}
+	err := w.finish(sw.ctx)
 	if werr := w.waitUploads(); err == nil {
 		err = werr
 	}
 	if err != nil {
 		return nil, w.stats, err
 	}
-	if opts.BeforeCommit != nil {
-		if err := opts.BeforeCommit(); err != nil {
+	if w.opts.BeforeCommit != nil {
+		if err := w.opts.BeforeCommit(); err != nil {
 			return nil, w.stats, fmt.Errorf("snapshot abandoned: %w", err)
 		}
 	}
 	// Commit: index files first, then the snapshot.
-	if _, err := r.writeIndex(ctx, comp, w.pending); err != nil {
+	if _, err := sw.r.writeIndex(sw.ctx, sw.comp, w.pending); err != nil {
 		return nil, w.stats, err
 	}
-	meta.End = r.now().UTC()
-	meta.Size, meta.Chunks, meta.List = w.stats.Bytes, w.stats.Chunks, w.listIDs
-	if err := r.putMeta(ctx, snapshotKey(meta.ID), meta, backend.PutOptions{IfNotExists: true}); err != nil {
+	meta := sw.meta
+	meta.End = sw.r.now().UTC()
+	main := sw.parts[0]
+	meta.Name, meta.Size, meta.Chunks, meta.List = main.Name, main.Size, main.Chunks, main.List
+	if len(sw.parts) > 1 {
+		meta.Parts = append([]Part(nil), sw.parts[1:]...)
+	}
+	if err := sw.r.putMeta(sw.ctx, snapshotKey(meta.ID), meta, backend.PutOptions{IfNotExists: true}); err != nil {
 		return nil, w.stats, err
 	}
+	sw.committed = true
 	return &meta, w.stats, nil
+}
+
+// Close waits for uploads still running and releases the writer. After a
+// failed or abandoned write nothing is committed; the uploaded packs are
+// removed by a later prune.
+func (sw *SnapshotWriter) Close() {
+	if sw.closed {
+		return
+	}
+	sw.closed = true
+	_ = sw.w.waitUploads()
+	_ = sw.comp.Close()
 }
 
 // prepared is a chunk after hashing and, if new, compression.

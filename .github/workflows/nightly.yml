@@ -68,7 +68,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - run: go test -run '^TestLargeSnapshot$' -v -timeout 50m ./internal/repo/
+      - run: go test -run '^(TestLargeSnapshot|TestBackupConstantMemory)$' -v -timeout 50m ./internal/repo/ ./internal/ops/
 
   repository-model:
     # Many more random sequences of writes, pins, crashes and restarts than
