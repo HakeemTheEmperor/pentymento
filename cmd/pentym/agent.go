@@ -99,7 +99,8 @@ func (a *app) runAgent(ctx context.Context) error {
 		}
 		return a.backupReport(t.Name, res), nil
 	}
-	ag, err = agent.New(agent.Options{Config: cfg, Repo: r, Telemetry: tel, Cleanup: set.CleanLeftovers, Backup: backupNow})
+	engineFor := func(t agent.Target) (engine.Engine, error) { return a.newEngine(ag.Config(), t.Config) }
+	ag, err = agent.New(agent.Options{Config: cfg, Repo: r, Telemetry: tel, Cleanup: set.CleanLeftovers, Backup: backupNow, Engine: engineFor})
 	if err != nil {
 		return err
 	}

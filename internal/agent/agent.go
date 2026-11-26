@@ -13,6 +13,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"sort"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/config"
+	"github.com/HakeemTheEmperor/pentymento/internal/engine"
 	"github.com/HakeemTheEmperor/pentymento/internal/lock"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
 	"github.com/HakeemTheEmperor/pentymento/internal/repo"
@@ -65,9 +67,12 @@ type Options struct {
 	// Host names this machine in heartbeats and leases; empty means the
 	// host name.
 	Host string
-	// Capture runs while a lease is held; nil holds leases without
-	// capturing.
+	// Capture runs while a lease is held. When nil and Engine is set, the
+	// agent captures through the target's engine; with neither it holds
+	// leases without capturing.
 	Capture CaptureFunc
+	// Engine builds a target's engine, for capture and gap detection.
+	Engine func(t Target) (engine.Engine, error)
 	// Cleanup removes what a crashed run left behind (side instances,
 	// temporary credential files); nil does nothing.
 	Cleanup func(ctx context.Context) (int, error)
@@ -81,6 +86,7 @@ type Options struct {
 	Timings          lock.LeaseTimings
 	Heartbeat        time.Duration
 	ShutdownDeadline time.Duration
+	HealthInterval   time.Duration
 	Clock            lock.Clock
 }
 
@@ -101,6 +107,15 @@ type Agent struct {
 	runCtx  context.Context
 	started time.Time
 	lastHB  atomic.Pointer[time.Time]
+
+	// Background work, such as backups forced by a capture gap: cancelled
+	// and waited for at shutdown.
+	bgCtx    context.Context
+	bgCancel context.CancelFunc
+	bg       sync.WaitGroup
+	forcedMu sync.Mutex
+	forced   map[string]bool
+	started0 map[string]bool
 }
 
 // targetLoop is one target's lease loop.
@@ -146,19 +161,29 @@ func New(o Options) (*Agent, error) {
 	if o.Clock == nil {
 		o.Clock = lock.SystemClock
 	}
+	if o.HealthInterval == 0 {
+		o.HealthInterval = HealthInterval
+	}
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
 		return nil, err
 	}
 	id := hex.EncodeToString(b)
 	ident := repo.CurrentIdentity()
-	return &Agent{
+	a := &Agent{
 		o: o, id: id, cfg: o.Config,
-		holder:  lock.CurrentHolder(ident.User, o.Host, id),
-		log:     o.Telemetry.Component("agent"),
-		uploads: NewPool(runtime.GOMAXPROCS(0)),
-		targets: map[string]*targetLoop{},
-	}, nil
+		holder:   lock.CurrentHolder(ident.User, o.Host, id),
+		log:      o.Telemetry.Component("agent"),
+		uploads:  NewPool(runtime.GOMAXPROCS(0)),
+		targets:  map[string]*targetLoop{},
+		forced:   map[string]bool{},
+		started0: map[string]bool{},
+	}
+	a.bgCtx, a.bgCancel = context.WithCancel(context.Background())
+	if a.o.Capture == nil && a.o.Engine != nil {
+		a.o.Capture = a.captureFor
+	}
+	return a, nil
 }
 
 // ID is this agent's random ID, recorded in its heartbeats and leases.
@@ -211,6 +236,14 @@ func (a *Agent) Run(ctx context.Context) error {
 	cancel()
 	<-hbDone
 	err := a.stopAll(sctx)
+	a.bgCancel() // forced backups commit nothing when stopped
+	bgDone := make(chan struct{})
+	go func() { a.bg.Wait(); close(bgDone) }()
+	select {
+	case <-bgDone:
+	case <-sctx.Done():
+		err = errors.Join(err, errors.New("background work did not stop in time"))
+	}
 	if herr := a.heartbeat(sctx, repo.StateStopped); herr != nil {
 		err = errors.Join(err, fmt.Errorf("write the final heartbeat: %w", herr))
 	}
@@ -353,7 +386,7 @@ func (a *Agent) startCapture(ctx context.Context, t Target, log *slog.Logger) fu
 	go func() {
 		defer close(done)
 		for cctx.Err() == nil {
-			err := a.o.Capture(cctx, t)
+			err := a.runCapture(cctx, t)
 			if cctx.Err() != nil {
 				return
 			}
@@ -365,6 +398,17 @@ func (a *Agent) startCapture(ctx context.Context, t Target, log *slog.Logger) fu
 		}
 	}()
 	return func() { cancel(); <-done }
+}
+
+// runCapture runs the capture function once, turning a panic into an
+// error: one failing target must not stop the agent.
+func (a *Agent) runCapture(ctx context.Context, t Target) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("capture panicked: %v\n%s", p, debug.Stack())
+		}
+	}()
+	return a.o.Capture(ctx, t)
 }
 
 // heartbeat writes one heartbeat.

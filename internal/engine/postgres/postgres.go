@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/engine"
@@ -19,7 +20,7 @@ import (
 var Versions = []string{"16", "17", "18"}
 
 // errNotYet is returned by the parts of the engine later chunks build.
-var errNotYet = errors.New("not implemented in this build")
+var errNotYet = fmt.Errorf("not implemented in this build: %w", errors.ErrUnsupported)
 
 // Engine is the Postgres engine (SDD 4.2).
 type Engine struct {
