@@ -114,6 +114,9 @@ func resolveEnvPath(root *yaml.Node, t reflect.Type, segs []string) ([]string, e
 		path = append(path, key)
 		node = child(node, key)
 	}
+	for t.Kind() == reflect.Pointer { // an optional value, such as agent.write_only
+		t = t.Elem()
+	}
 	if !isLeaf(t) {
 		return nil, fmt.Errorf("%s is not a single value, so it cannot be set from the environment", strings.Join(path, "."))
 	}

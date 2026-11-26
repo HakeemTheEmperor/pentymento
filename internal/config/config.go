@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/secrets"
@@ -38,6 +39,54 @@ type Config struct {
 	Tools Tools `yaml:"tools"`
 	// Targets are the configured databases, by name.
 	Targets map[string]Target `yaml:"targets"`
+	// Agent configures pentym agent.
+	Agent Agent `yaml:"agent"`
+}
+
+// Agent configures the long-running agent (SDD 9).
+type Agent struct {
+	// WriteOnly makes the agent refuse to start when its key slot can
+	// unlock the private key (SDD 8.4); nil means true.
+	WriteOnly *bool `yaml:"write_only"`
+	// Socket is the control socket: a Unix socket path, or a Windows
+	// named pipe (\\.\pipe\name). Empty means the default from
+	// AgentSocket.
+	Socket string `yaml:"socket"`
+	// HealthListen is an address (host:port) for the opt-in TCP health
+	// port, which serves only /health, /ready and /metrics; empty means
+	// off.
+	HealthListen string `yaml:"health_listen"`
+	// Debug holds debugging switches.
+	Debug AgentDebug `yaml:"debug"`
+}
+
+// AgentDebug holds the agent's debugging switches.
+type AgentDebug struct {
+	// PProf serves Go's profiling endpoints on the control socket.
+	PProf bool `yaml:"pprof"`
+}
+
+// IsWriteOnly reports whether the agent must refuse a key slot that can
+// read backups; the default is true.
+func (a Agent) IsWriteOnly() bool { return a.WriteOnly == nil || *a.WriteOnly }
+
+// WindowsPipe is the agent's default control socket on Windows.
+const WindowsPipe = `\\.\pipe\pentym-agent`
+
+// AgentSocket returns the control socket's address: agent.socket, or by
+// default <work_dir>/agent.sock (the named pipe WindowsPipe on Windows).
+func (c *Config) AgentSocket() (string, error) {
+	if c.Agent.Socket != "" {
+		return c.Agent.Socket, nil
+	}
+	if runtime.GOOS == "windows" {
+		return WindowsPipe, nil
+	}
+	dir, err := c.WorkDirPath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "agent.sock"), nil
 }
 
 // Repository is the repository location and how to unlock it.
@@ -258,6 +307,9 @@ func (c *Config) validate() error {
 	if c.WorkDir != "" && !filepath.IsAbs(c.WorkDir) {
 		return fmt.Errorf("work_dir must be an absolute path, not %q", c.WorkDir)
 	}
+	if err := c.Agent.validate(); err != nil {
+		return err
+	}
 	seenProvider := map[string]bool{}
 	for _, p := range c.InstanceProvider {
 		if p != ProviderDocker && p != ProviderLocal {
@@ -426,4 +478,23 @@ func loopback(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func (a Agent) validate() error {
+	if s := a.Socket; s != "" && !strings.HasPrefix(s, `\\.\pipe\`) && !filepath.IsAbs(s) {
+		return fmt.Errorf(`agent.socket must be an absolute path or a named pipe (\\.\pipe\name), not %q`, s)
+	}
+	if h := a.HealthListen; h != "" {
+		host, port, err := net.SplitHostPort(h)
+		if err != nil {
+			return fmt.Errorf("agent.health_listen must be host:port, such as 127.0.0.1:9187, not %q", h)
+		}
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return fmt.Errorf("agent.health_listen: %q is not a TCP port", port)
+		}
+		if host == "" {
+			return errors.New("agent.health_listen needs an address to bind, such as 127.0.0.1 or the pod IP; it is never bound to every interface")
+		}
+	}
+	return nil
 }

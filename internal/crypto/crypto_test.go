@@ -675,7 +675,7 @@ func TestPrimitivesOnly(t *testing.T) {
 		for _, imp := range pf.Imports {
 			path, _ := strconv.Unquote(imp.Path.Value)
 			cryptoish := strings.HasPrefix(path, "crypto/") || strings.HasPrefix(path, "golang.org/x/crypto") ||
-				strings.Contains(path, "/age") || strings.Contains(path, "blake3") ||
+				ageLike(path) || strings.Contains(path, "blake3") ||
 				strings.Contains(path, "chacha") || strings.Contains(path, "argon") || strings.Contains(path, "nacl")
 			if cryptoish && !allowed[path] {
 				t.Errorf("%s imports %s, which is not an approved cryptographic library", p, path)
@@ -722,4 +722,28 @@ func FuzzOpenObject(f *testing.F) {
 		_, _ = OpenPrivate(m.Master, data)
 		_, _ = OpenPublic(m.Metadata, data)
 	})
+}
+
+// ageLike reports whether an import path is the age library or one like
+// it: a path segment named age, such as filippo.io/age, filippo.io/age/armor
+// or a fork's example.com/x/age. It does not match a segment that merely
+// starts with "age", such as pentym's own internal/agent.
+func ageLike(path string) bool {
+	for _, seg := range strings.Split(path, "/") {
+		if seg == "age" {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAgeLike(t *testing.T) {
+	for path, want := range map[string]bool{
+		"filippo.io/age": true, "filippo.io/age/armor": true, "example.com/fork/age": true,
+		"github.com/HakeemTheEmperor/pentymento/internal/agent": false, "example.com/agenda": false,
+	} {
+		if ageLike(path) != want {
+			t.Errorf("ageLike(%q) = %v", path, !want)
+		}
+	}
 }

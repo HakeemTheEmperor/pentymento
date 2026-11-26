@@ -41,6 +41,10 @@ Unknown keys are rejected with the file and line, so a misspelt key never passes
 | `instance_provider` | Side-instance providers to try, in order: `docker`, `local`; default `[docker, local]` |
 | `work_dir` | Directory for side-instance files and temporary credential files; must be absolute; default `pentym/work` in the user's cache directory |
 | `tools.postgres`, `tools.mongodb` | Directories of database binaries, searched before PATH; must be absolute |
+| `agent.write_only` | Refuse to run the agent with a key slot that can read backups; default `true` ([PTM-4007](../errors/PTM-4007.md)) |
+| `agent.socket` | The agent's control socket: an absolute path, or a Windows named pipe; default `<work_dir>/agent.sock`, and `\\.\pipe\pentym-agent` on Windows |
+| `agent.health_listen` | `host:port` for the opt-in TCP health port, which serves only `/health`, `/ready` and `/metrics`; off when empty. It always names an address, such as `127.0.0.1` or the pod IP |
+| `agent.debug.pprof` | Serve Go's profiling endpoints on the control socket; default `false` |
 
 A target name is lowercase letters, digits, `-` and `_`, starts with a letter or digit, and is at most 63 characters. Two names that differ only in `-` and `_` are not allowed, because environment overrides cannot tell them apart.
 
@@ -116,6 +120,18 @@ tools:
 - A side instance listens on `127.0.0.1` only, on a random port, and its superuser password is random, passed through files that only pentym's user can read, and never shown.
 - `work_dir` holds each running instance's files under `instances/`, and temporary credential files under `secrets/`. Before starting an instance, pentym removes what a crashed run on the same machine left behind: servers, containers (labelled `pentym.owner-pid` and `pentym.owner-host`) and credential files.
 - `pentym doctor` reports what each provider can start.
+
+## Agent
+
+```yaml
+agent:
+  write_only: true               # the default
+  health_listen: 127.0.0.1:9187  # opt-in; off by default
+```
+
+- `pentym agent` unlocks the repository with `repository.key`, which should be an agent slot (`pentym key add --agent`). An agent slot can write backups and logs but never read them, so a compromised database host cannot read the backup history. With `write_only: true` the agent refuses a slot that can read.
+- The control socket is local only: a Unix socket readable only by the agent's user, or a named pipe for the agent's user and Administrators. It is never exposed to the network. The CLI finds it through the same configuration.
+- The TCP health port is for probes and Prometheus; no control action is ever reachable over the network.
 
 ## Includes
 
