@@ -70,6 +70,60 @@ func (cliFakeEngine) BaseBackup(ctx context.Context, _ engine.Target, sink engin
 	return &engine.BaseBackup{EngineVersion: "17.2", Method: "native", Start: "0/2000028", End: "0/2000100", Timeline: "1"}, nil
 }
 
+// cliMongoFake is a MongoDB standalone server: one archive, no log
+// positions, and the snapshots-only warning.
+type cliMongoFake struct{ engine.Engine }
+
+func (cliMongoFake) Name() string { return "mongodb" }
+
+func (cliMongoFake) Check(context.Context, engine.Target) (*engine.CheckResult, error) {
+	return &engine.CheckResult{ServerVersion: "8.0.4", Findings: []engine.Finding{{Level: msg.LevelWarning, ID: "PTM-2011",
+		Fact: "this is a standalone server with no oplog, so pentym takes snapshots only: no point-in-time recovery",
+		Next: "run it as a single-node replica set to get point-in-time recovery"}}}, nil
+}
+
+func (cliMongoFake) Inventory(context.Context, engine.Target) (json.RawMessage, error) {
+	return json.RawMessage(`{"server_version":"8.0.4","databases":[]}`), nil
+}
+
+func (cliMongoFake) BaseBackup(ctx context.Context, _ engine.Target, sink engine.ArchiveSink) (*engine.BaseBackup, error) {
+	w, err := sink.Archive(ctx, "mongodump.archive")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := w.Write(bytes.Repeat([]byte("mongodump "), 100000)); err != nil {
+		return nil, err
+	}
+	return &engine.BaseBackup{EngineVersion: "8.0.4", Method: "mongodump"}, nil
+}
+
+// TestBackupCommandMongoDB backs up a MongoDB target through the same
+// command and lists it beside a Postgres snapshot.
+func TestBackupCommandMongoDB(t *testing.T) {
+	c := backupEnv(t, "env:KA")
+	r := c.runFake("--json", "backup", "prod-mg")
+	var doc struct {
+		Snapshot snapshotInfo `json:"snapshot"`
+	}
+	if r.code != msg.ExitOK || json.Unmarshal([]byte(r.stdout), &doc) != nil {
+		t.Fatalf("exit %d\nstdout: %s\nstderr: %s", r.code, r.stdout, r.stderr)
+	}
+	s := doc.Snapshot
+	if s.Target != "prod-mg" || s.Engine != "mongodb" || s.Method != "mongodump" || strings.Join(s.Parts, ",") != "mongodump.archive" ||
+		s.StartPosition != "" || s.Timeline != "" || s.Size != 1000000 {
+		t.Errorf("--json = %+v", s)
+	}
+	r = c.runFake("backup", "prod-mg")
+	if r.code != msg.ExitOK || !strings.Contains(r.stderr, "! prod-mg: this is a standalone server with no oplog") {
+		t.Errorf("exit %d\nstderr: %s", r.code, r.stderr)
+	}
+	c.runFake("backup", "prod-pg")
+	lines := strings.Split(strings.TrimSuffix(c.runFake("list").stdout, "\n"), "\n")
+	if len(lines) != 4 || !strings.Contains(lines[1], "  prod-mg  mongodb 8.0.4  ") || !strings.Contains(lines[3], "  prod-pg  postgres 17.2  ") {
+		t.Errorf("list:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
 // backupEnv is a repository with a Postgres target and a MongoDB one,
 // backed up with the agent slot.
 func backupEnv(t *testing.T, key string) *cliEnv {
@@ -90,8 +144,8 @@ func (c *cliEnv) runFake(args ...string) result {
 	var stdout, stderr bytes.Buffer
 	a := newApp(strings.NewReader(""), &stdout, &stderr, func(k string) string { return c.env[k] })
 	a.engineFor = func(_ *config.Config, t config.Target) (engine.Engine, error) {
-		if t.Engine != "postgres" {
-			return nil, &msg.Error{Code: msg.ExitNotImplemented, Message: msg.Message{Level: msg.LevelFailed, Fact: t.Engine + " backups are not implemented in this build"}}
+		if t.Engine == "mongodb" {
+			return cliMongoFake{}, nil
 		}
 		return cliFakeEngine{}, nil
 	}

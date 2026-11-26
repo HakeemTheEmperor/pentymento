@@ -142,7 +142,7 @@ func TestMongodump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum.OplogEntries != 3 || position(sum.OplogFirst) != "1732600000:1" || position(sum.OplogLast) != "1732600005:1" {
+	if sum.OplogEntries != 3 || Position(sum.OplogFirst) != "1732600000:1" || Position(sum.OplogLast) != "1732600005:1" {
 		t.Errorf("summary = %+v", sum)
 	}
 	if len(sink.names) != 1 || sink.names[0] != ArchiveName || !bytes.Equal(sink.data[ArchiveName].Bytes(), sampleArchive()) {
