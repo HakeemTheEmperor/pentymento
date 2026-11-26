@@ -47,6 +47,9 @@ password_encryption = 'scram-sha-256'
 archive_mode = off
 shared_preload_libraries = ''
 ssl = off
+# Tablespaces are restored in place, as directories under pg_tblspc;
+# without this Postgres stops at the end of recovery when it finds them.
+allow_in_place_tablespaces = on
 logging_collector = off
 log_destination = 'stderr'
 `
@@ -98,7 +101,7 @@ func (e *Engine) Restore(ctx context.Context, req engine.RestoreRequest, start e
 	if err != nil {
 		return nil, nil, err
 	}
-	conn, err := e.lockSideInstance(ctx, inst.Conn(), req)
+	conn, err := e.lockSideInstance(ctx, inst, req)
 	if err != nil {
 		_ = inst.Stop(context.WithoutCancel(ctx))
 		return nil, nil, err
@@ -271,9 +274,18 @@ func sideConnect(ctx context.Context, c instance.Conn, user string, password sec
 // side role with a random password, allows only it, and returns its
 // login. It logs in first as the target's backup role, which exists in the
 // backup, to find the cluster's bootstrap superuser.
-func (e *Engine) lockSideInstance(ctx context.Context, c instance.Conn, req engine.RestoreRequest) (instance.Conn, error) {
+func (e *Engine) lockSideInstance(ctx context.Context, inst instance.Instance, req engine.RestoreRequest) (_ instance.Conn, err error) {
+	c := inst.Conn()
+	var pw secrets.Secret
+	defer func() {
+		// A server that failed to start or stopped says why in its output.
+		if d, ok := inst.(instance.Diagnostics); ok && err != nil {
+			if out := d.LastOutput(context.WithoutCancel(ctx)); out != "" {
+				err = fmt.Errorf("%w\nside instance output:\n%s", err, secrets.Scrub(out, pw))
+			}
+		}
+	}()
 	var conn *pgconn.PgConn
-	var err error
 	for _, user := range uniqueNonEmpty(req.Target.Config.Credentials.Backup.User, "postgres") {
 		if conn, err = sideConnect(ctx, c, user, secrets.Secret{}); err == nil {
 			break
@@ -300,7 +312,7 @@ func (e *Engine) lockSideInstance(ctx context.Context, c instance.Conn, req engi
 	if _, err := rand.Read(b); err != nil {
 		return instance.Conn{}, err
 	}
-	pw := secrets.New([]byte(hex.EncodeToString(b)))
+	pw = secrets.New([]byte(hex.EncodeToString(b)))
 	sql := fmt.Sprintf(`DO $$ BEGIN
 IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '%[1]s') THEN ALTER ROLE %[1]s SUPERUSER LOGIN PASSWORD '%[2]s';
 ELSE CREATE ROLE %[1]s SUPERUSER LOGIN PASSWORD '%[2]s'; END IF; END $$`, SideRole, pw.Expose())

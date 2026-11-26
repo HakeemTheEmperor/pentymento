@@ -42,6 +42,14 @@ type Instance interface {
 	Stop(ctx context.Context) error
 }
 
+// Diagnostics is implemented by instances that can show their server's
+// last output, to explain a server that failed to start or stopped.
+type Diagnostics interface {
+	// LastOutput returns the server's last lines of output, or "" when
+	// there is nothing to show.
+	LastOutput(ctx context.Context) string
+}
+
 // Provider starts side instances: local binaries or Docker (C12b).
 type Provider interface {
 	// Name is "local" or "docker", as in the instance_provider setting.

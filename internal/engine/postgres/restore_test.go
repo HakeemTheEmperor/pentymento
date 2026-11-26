@@ -129,7 +129,7 @@ func TestPrepareConfig(t *testing.T) {
 			t.Errorf("%s is still there", gone)
 		}
 	}
-	for _, want := range []string{"archive_mode = off", "shared_preload_libraries = ''", "ssl = off"} {
+	for _, want := range []string{"archive_mode = off", "shared_preload_libraries = ''", "ssl = off", "allow_in_place_tablespaces = on"} {
 		if !strings.Contains(sideConf, want) {
 			t.Errorf("the side configuration lacks %q", want)
 		}
