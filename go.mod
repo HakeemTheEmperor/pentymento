@@ -6,6 +6,7 @@ toolchain go1.26.11
 
 require (
 	filippo.io/age v1.3.2
+	github.com/Microsoft/go-winio v0.6.2
 	github.com/aws/aws-sdk-go-v2 v1.48.1
 	github.com/aws/aws-sdk-go-v2/config v1.33.22
 	github.com/aws/aws-sdk-go-v2/credentials v1.21.4
@@ -35,7 +36,6 @@ require (
 	dario.cat/mergo v1.0.2 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20261006220739-8c912ac31dd4 // indirect
-	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.28 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.20.10 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.5.13 // indirect

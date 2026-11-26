@@ -143,14 +143,17 @@ func (c *cliEnv) runFake(args ...string) result {
 	c.t.Helper()
 	var stdout, stderr bytes.Buffer
 	a := newApp(strings.NewReader(""), &stdout, &stderr, func(k string) string { return c.env[k] })
-	a.engineFor = func(_ *config.Config, t config.Target) (engine.Engine, error) {
-		if t.Engine == "mongodb" {
-			return cliMongoFake{}, nil
-		}
-		return cliFakeEngine{}, nil
-	}
+	a.engineFor = fakeEngines
 	code := a.execute(context.Background(), append([]string{"--config", c.config}, args...))
 	return result{code, stdout.String(), stderr.String()}
+}
+
+// fakeEngines builds the fake engine for a target's engine.
+func fakeEngines(_ *config.Config, t config.Target) (engine.Engine, error) {
+	if t.Engine == "mongodb" {
+		return cliMongoFake{}, nil
+	}
+	return cliFakeEngine{}, nil
 }
 
 func TestBackupCommand(t *testing.T) {
@@ -192,7 +195,6 @@ func TestBackupCommandRefusals(t *testing.T) {
 		fact string
 	}{
 		{[]string{"backup", "nosuch"}, msg.ExitNotFound, "no target nosuch in the config"},
-		{[]string{"backup", "prod-pg", "--now"}, msg.ExitNotImplemented, "--now needs the agent, which is not implemented in this build"},
 	} {
 		r := c.runFake(append([]string{"--json"}, tt.args...)...)
 		if doc := errorDoc(t, r); r.code != tt.code || doc.Message != tt.fact {

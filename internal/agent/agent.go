@@ -71,6 +71,9 @@ type Options struct {
 	// Cleanup removes what a crashed run left behind (side instances,
 	// temporary credential files); nil does nothing.
 	Cleanup func(ctx context.Context) (int, error)
+	// Backup takes a backup of a target now, through the agent's
+	// repository and lock (backup --now); nil refuses.
+	Backup func(ctx context.Context, t Target) (any, error)
 	// OnLease, if set, is told when this agent gains or loses a target's
 	// lease.
 	OnLease func(target string, held bool, generation uint64)
@@ -388,6 +391,35 @@ func (a *Agent) heartbeatLoop(ctx context.Context, done chan<- struct{}) {
 			}
 		}
 	}
+}
+
+// BackupNow backs up one of the agent's configured targets now, as the
+// control socket's backup-now asks.
+func (a *Agent) BackupNow(ctx context.Context, name string) (any, error) {
+	if a.o.Backup == nil {
+		return nil, errors.New("this agent cannot take backups")
+	}
+	a.mu.Lock()
+	c, ok := a.cfg.Targets[name]
+	a.mu.Unlock()
+	if !ok {
+		return nil, &msg.Error{Code: msg.ExitNotFound, Message: msg.Message{
+			Level: msg.LevelFailed, Fact: "the running agent has no target " + name,
+			Next: "add it under targets: in the agent's config, then run pentym agent reload",
+		}}
+	}
+	tid, err := a.o.Repo.TargetID(name)
+	if err != nil {
+		return nil, err
+	}
+	return a.o.Backup(ctx, Target{Name: name, ID: tid, Config: c})
+}
+
+// Config returns the agent's current configuration.
+func (a *Agent) Config() *config.Config {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cfg
 }
 
 // ReloadResult says what a reload changed.
