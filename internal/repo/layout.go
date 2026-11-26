@@ -44,6 +44,13 @@ func checkpointKey(tid string, generation, seq uint64) string {
 	return fmt.Sprintf("%s%020d-%020d", checkpointPrefix(tid), generation, seq)
 }
 
+func gapPrefix(tid string) string { return targetsPrefix + tid + "/gaps/" }
+
+// gapKey sorts gaps by the time they were found.
+func gapKey(tid string, t time.Time) string {
+	return fmt.Sprintf("%s%s-%s", gapPrefix(tid), sortableTime(t), randomHex(4))
+}
+
 func eventPrefix(tid string) string { return eventsPrefix + tid + "/" }
 
 // eventKey sorts by the event's time.

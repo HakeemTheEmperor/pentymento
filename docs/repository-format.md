@@ -19,6 +19,7 @@ wal/<target-id>/<timeline>.history.zst.enc   Postgres timeline history files
 oplog/<target-id>/<first>-<last>.zst.enc     MongoDB oplog batches
 targets/<target-id>/info                     the target's name and engine
 targets/<target-id>/checkpoints/<gen>-<seq>  capture checkpoints
+targets/<target-id>/gaps/<time>-<rand>       capture gaps
 events/<target-id>/<time>-<rand>             destructive events
 heartbeat/agent-<host>/<time>                agent heartbeats
 journal/<yyyy>/<mm>/<time>-<rand>            operations journal
@@ -75,7 +76,8 @@ Every object below is compact JSON, encrypted with the metadata key and bound to
 | Object | Fields |
 | --- | --- |
 | `targets/<id>/info` | `name`, `engine` |
-| Checkpoint | `target`, `generation` (the capture lease's), `seq`, `position` (engine-specific: LSN and timeline, or oplog timestamp), `time` |
+| Checkpoint | `target`, `generation` (the capture lease's), `seq`, `position` (engine-specific: for Postgres `<timeline>/<LSN>`, such as `1/0/3000060`; for MongoDB the oplog timestamp), `time` |
+| Gap | `target`, `from` (the last position stored before it, if known), `to` (where capture could resume, if known), `reason`, `time`, `generation` (the capture lease of the agent that found it). A stretch of log that was never stored, because the replication slot was dropped or invalidated, the server removed WAL, or the oplog rolled over: point-in-time recovery cannot reach a time inside it |
 | Event | `target`, `type`, `object`, `xid`, `lsn`, `oplog_ts`, `position`, `time` |
 | Heartbeat | `host`, `agent_id`, `state` (`running` or `stopped`), `time` |
 | Journal entry | `who`, `host`, `operation`, `target`, `run_id`, `credential` (the reference used, never a secret), `start`, `end`, `result` (`ok`, `failed` or `skipped`), `detail` (scrubbed of secrets) |

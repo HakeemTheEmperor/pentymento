@@ -36,6 +36,8 @@ type Engine struct {
 	Logger *slog.Logger
 	// RunID tags child processes' logs.
 	RunID string
+	// Observer, if set, receives captured WAL as it arrives.
+	Observer WALObserver
 }
 
 var _ engine.Engine = (*Engine)(nil)
@@ -63,16 +65,6 @@ func (e *Engine) logger() *slog.Logger {
 		return e.Logger
 	}
 	return slog.New(slog.DiscardHandler)
-}
-
-// Capture comes with the agent (C17).
-func (*Engine) Capture(context.Context, engine.Target, engine.Position, engine.LogSink) error {
-	return errNotYet
-}
-
-// DetectGap comes with the agent (C17).
-func (*Engine) DetectGap(context.Context, engine.Target, engine.Position) (*engine.Gap, error) {
-	return nil, errNotYet
 }
 
 // Extract comes with restores (C16).

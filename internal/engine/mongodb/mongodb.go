@@ -81,6 +81,11 @@ func (*Engine) DetectGap(context.Context, engine.Target, engine.Position) (*engi
 	return nil, errNotYet
 }
 
+// LogHealth comes with oplog capture.
+func (*Engine) LogHealth(context.Context, engine.Target) (*engine.LogHealth, error) {
+	return nil, errNotYet
+}
+
 // Extract comes with restores.
 func (*Engine) Extract(context.Context, instance.Instance, engine.Target, engine.ExtractRequest) error {
 	return errNotYet

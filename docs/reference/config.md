@@ -38,6 +38,8 @@ Unknown keys are rejected with the file and line, so a misspelt key never passes
 | `targets.<name>.uri` | Where the MongoDB server or replica set is: a connection string such as `mongodb://db1:27017,db2:27017/?replicaSet=rs0&tls=true`, or `mongodb+srv://…`; default `mongodb://localhost:27017`. It must not hold a user name or password. MongoDB targets only; Postgres targets use `host`, `port` and `database` |
 | `targets.<name>.credentials.backup.user` | The role (Postgres) or user (MongoDB) base backups connect as. Postgres needs `REPLICATION`; MongoDB needs the `backup` role and read on `local`. Leave it out for MongoDB x.509 (`authMechanism=MONGODB-X509` in `uri`) |
 | `targets.<name>.credentials.backup.password` | A [secret reference](#secrets) to its password; leave it out for certificates, peer authentication or `.pgpass` |
+| `targets.<name>.credentials.replication.user`, `.password` | The role WAL capture connects as (Postgres; it needs `REPLICATION`, as `pentym_repl`); when unset, capture uses `credentials.backup` |
+| `targets.<name>.slot` | The physical replication slot WAL capture streams from (Postgres); default `pentym_` and the target name with `-` turned into `_`. pentym creates it if it does not exist, and never drops a slot that still holds WAL |
 | `instance_provider` | Side-instance providers to try, in order: `docker`, `local`; default `[docker, local]` |
 | `work_dir` | Directory for side-instance files and temporary credential files; must be absolute; default `pentym/work` in the user's cache directory |
 | `tools.postgres`, `tools.mongodb` | Directories of database binaries, searched before PATH; must be absolute |

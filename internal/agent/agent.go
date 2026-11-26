@@ -483,6 +483,7 @@ func (a *Agent) Reload(ctx context.Context, cfg *config.Config) (*ReloadResult, 
 // file their secret references were written.
 func sameTarget(x, y config.Target) bool {
 	x.Credentials.Backup.Password.Line, y.Credentials.Backup.Password.Line = 0, 0
+	x.Credentials.Replication.Password.Line, y.Credentials.Replication.Password.Line = 0, 0
 	return reflect.DeepEqual(x, y)
 }
 

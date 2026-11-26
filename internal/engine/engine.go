@@ -112,8 +112,16 @@ type Segment struct {
 	Name        string
 	Timeline    string
 	First, Last Position
-	Data        []byte
+	// Checkpoint is where capture resumes once this segment is stored, in
+	// the engine's own form; the agent records it in the checkpoint as it
+	// is.
+	Checkpoint Position
+	Data       []byte
 }
+
+// ErrGap means capture cannot continue from the position asked for: the
+// log since it is gone. DetectGap says what was lost.
+var ErrGap = errors.New("the log since the checkpoint can no longer be captured")
 
 // Event is a destructive event detected in the log (PRD 7.4): a drop,
 // truncate, database drop, rename, or a burst of deletes.
@@ -140,6 +148,21 @@ type LogSink interface {
 type Gap struct {
 	From, To Position
 	Reason   string
+}
+
+// LogHealth is the state of the log capture depends on, for monitoring
+// against the alert thresholds (PRD 9.1).
+type LogHealth struct {
+	// Head is the server's newest log position.
+	Head Position
+	// RetainedBytes is the WAL the replication slot holds back on the
+	// server (Postgres); RetainedLimit is max_slot_wal_keep_size in bytes,
+	// or 0 when the server sets no limit.
+	RetainedBytes, RetainedLimit int64
+	// Lost reports a slot the server has invalidated.
+	Lost bool
+	// Window is how far back the oplog reaches (MongoDB).
+	Window time.Duration
 }
 
 // Point is a restore target: exactly one field is set.
@@ -223,6 +246,9 @@ type Engine interface {
 	// DetectGap reports whether the log since a checkpoint can still be
 	// captured; nil means it can.
 	DetectGap(ctx context.Context, t Target, checkpoint Position) (*Gap, error)
+	// LogHealth reports how much log the server retains for capture, for
+	// monitoring.
+	LogHealth(ctx context.Context, t Target) (*LogHealth, error)
 	// Restore brings up a side instance with the snapshot restored (and,
 	// later, replayed to req.Point), calling start when the data directory
 	// is ready (Postgres) or first (MongoDB). The instance's Conn logs in
