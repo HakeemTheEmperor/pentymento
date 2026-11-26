@@ -137,7 +137,7 @@ func writer(ctx context.Context, dsn string, done chan<- string) {
 	defer func() { _ = conn.Close(context.Background()) }()
 	for i := 0; ctx.Err() == nil; i++ {
 		_, _ = conn.Exec(context.Background(), "INSERT INTO events (note) SELECT md5(g::text) FROM generate_series(1, 2000) AS g").ReadAll()
-		if i%15 == 14 {
+		if i%60 == 59 {
 			_, _ = conn.Exec(context.Background(), "SELECT pg_switch_wal()").ReadAll()
 		}
 		time.Sleep(20 * time.Millisecond)
@@ -227,11 +227,22 @@ func TestCaptureSurvivesKills(t *testing.T) {
 			if end == "" {
 				t.Fatal("the writer could not report its last position")
 			}
-			// A last agent catches up, then stops gracefully, storing the
-			// segment in progress.
+			// A last agent catches up with everything written, then stops
+			// gracefully.
 			c := startChild(t, dir, "final")
 			waitFor(t, "the lease", 15*time.Second, func() bool { return c.saw("held") })
-			time.Sleep(postgres.PartialInterval + 3*time.Second)
+			endLSN := parseLSNText(t, end)
+			caughtUp := time.Now()
+			waitFor(t, "capture to catch up with the last commit", 5*time.Minute, func() bool {
+				cp := checkpoint(t, dir)
+				if cp == nil {
+					return false
+				}
+				_, lsn, _ := strings.Cut(cp.Position, "/")
+				l, err := parseLSN(lsn)
+				return err == nil && uint64(l) >= endLSN
+			})
+			t.Logf("the final agent caught up in %s", time.Since(caughtUp).Round(time.Second))
 			_ = c.stdin.Close()
 			if err := <-c.exit; err != nil {
 				t.Fatalf("the final agent: %v: %s", err, c.output())

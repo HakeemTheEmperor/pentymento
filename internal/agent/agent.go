@@ -199,7 +199,9 @@ func (a *Agent) Uploads() *Pool { return a.uploads }
 // Run starts the agent and runs it until ctx ends, then shuts down
 // gracefully within the shutdown deadline (SDD 9.4, 9.5).
 func (a *Agent) Run(ctx context.Context) error {
+	a.mu.Lock() // Status may already be read through the control socket
 	a.started = time.Now()
+	a.mu.Unlock()
 	if a.o.Cleanup != nil {
 		if n, err := a.o.Cleanup(ctx); err != nil {
 			a.log.Warn("could not remove everything a previous run left behind", "error", err)
@@ -555,11 +557,12 @@ type Status struct {
 
 // Status returns the agent's live state.
 func (a *Agent) Status() Status {
-	s := Status{AgentID: a.id, Host: a.o.Host, Started: a.started, Ready: a.Ready(), UploadQueue: a.uploads.Waiting(), Targets: []TargetStatus{}}
+	s := Status{AgentID: a.id, Host: a.o.Host, Ready: a.Ready(), UploadQueue: a.uploads.Waiting(), Targets: []TargetStatus{}}
 	if hb := a.lastHB.Load(); hb != nil {
 		s.LastHeartbeat = *hb
 	}
 	a.mu.Lock()
+	s.Started = a.started
 	for _, tl := range a.targets {
 		tl.mu.Lock()
 		s.Targets = append(s.Targets, TargetStatus{
