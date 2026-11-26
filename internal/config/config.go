@@ -4,7 +4,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,12 +43,61 @@ type Config struct {
 // Repository is the repository location and how to unlock it.
 type Repository struct {
 	// Path is the directory of a repository on local storage. It must be
-	// absolute.
+	// absolute. A repository is on local storage (Path) or in a bucket
+	// (S3), never both.
 	Path string `yaml:"path"`
+	// S3 is a repository in an S3-compatible bucket.
+	S3 S3 `yaml:"s3"`
 	// Key is a reference to the passphrase, recovery code or age identity
 	// that unlocks a key slot when there is no terminal to ask in.
 	Key secrets.Ref `yaml:"key"`
 }
+
+// S3 is a repository in an S3-compatible bucket (PRD 7.8).
+type S3 struct {
+	Bucket string `yaml:"bucket"`
+	// Prefix puts the repository under a "directory" of the bucket.
+	Prefix string `yaml:"prefix"`
+	Region string `yaml:"region"`
+	// Endpoint is an S3-compatible service's URL (MinIO, R2, B2, Wasabi,
+	// Spaces); empty means AWS. It must be https, except on the loopback
+	// interface.
+	Endpoint string `yaml:"endpoint"`
+	// PathStyle puts the bucket in the URL path rather than the host name,
+	// as many S3-compatible services need.
+	PathStyle bool `yaml:"path_style"`
+	// Credentials are static keys; empty means the AWS default credential
+	// chain (environment, shared files, instance roles, IRSA, OIDC).
+	Credentials S3Credentials `yaml:"credentials"`
+}
+
+// S3Credentials are static S3 keys, as secret references.
+type S3Credentials struct {
+	AccessKeyID     secrets.Ref `yaml:"access_key_id"`
+	SecretAccessKey secrets.Ref `yaml:"secret_access_key"`
+}
+
+// IsSet reports whether any S3 setting is present.
+func (s S3) IsSet() bool {
+	return s.Bucket != "" || s.Prefix != "" || s.Region != "" || s.Endpoint != "" || s.PathStyle ||
+		!s.Credentials.AccessKeyID.IsZero() || !s.Credentials.SecretAccessKey.IsZero()
+}
+
+// Location describes the repository's location for messages: its path,
+// or s3://bucket/prefix.
+func (r Repository) Location() string {
+	if r.S3.IsSet() {
+		loc := "s3://" + r.S3.Bucket
+		if p := strings.Trim(r.S3.Prefix, "/"); p != "" {
+			loc += "/" + p
+		}
+		return loc
+	}
+	return r.Path
+}
+
+// Configured reports whether the config names a repository.
+func (r Repository) Configured() bool { return r.Path != "" || r.S3.IsSet() }
 
 // Tools lists, per engine, directories holding its binaries (postgres,
 // pg_ctl, pg_dump …; mongod, mongodump …). Several can be listed, such as
@@ -195,6 +247,14 @@ func (c *Config) validate() error {
 	if p := c.Repository.Path; p != "" && !filepath.IsAbs(p) {
 		return fmt.Errorf("repository.path must be an absolute path, not %q", p)
 	}
+	if c.Repository.S3.IsSet() {
+		if c.Repository.Path != "" {
+			return errors.New("set repository.path or repository.s3, not both")
+		}
+		if err := c.Repository.S3.validate(); err != nil {
+			return err
+		}
+	}
 	if c.WorkDir != "" && !filepath.IsAbs(c.WorkDir) {
 		return fmt.Errorf("work_dir must be an absolute path, not %q", c.WorkDir)
 	}
@@ -323,4 +383,47 @@ func validateMongoURI(name, uri string) error {
 		}
 	}
 	return nil
+}
+
+// bucketRE is the form of an S3 bucket name.
+var bucketRE = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
+
+// prefixRE is the form of a repository prefix: key segments of the
+// characters pentym uses in keys.
+var prefixRE = regexp.MustCompile(`^[A-Za-z0-9_-][A-Za-z0-9._-]*(/[A-Za-z0-9_-][A-Za-z0-9._-]*)*$`)
+
+func (s S3) validate() error {
+	switch {
+	case s.Bucket == "":
+		return errors.New("repository.s3.bucket is required")
+	case !bucketRE.MatchString(s.Bucket):
+		return fmt.Errorf("repository.s3.bucket %q is not a valid bucket name (3-63 lowercase letters, digits, . and -)", s.Bucket)
+	case s.Region == "":
+		return errors.New("repository.s3.region is required (for S3-compatible services, the region they expect, such as us-east-1 or auto)")
+	}
+	if p := strings.Trim(s.Prefix, "/"); p != "" && !prefixRE.MatchString(p) {
+		return fmt.Errorf("repository.s3.prefix %q may hold only letters, digits, ., _, - and /, and no segment may start with a dot", s.Prefix)
+	}
+	if s.Endpoint != "" {
+		u, err := url.Parse(s.Endpoint)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+			return fmt.Errorf("repository.s3.endpoint %q must be a URL such as https://s3.example.com", s.Endpoint)
+		}
+		if u.Scheme == "http" && !loopback(u.Hostname()) {
+			return fmt.Errorf("repository.s3.endpoint must use https; plain http is allowed only on the loopback interface, not %s", u.Host)
+		}
+	}
+	if s.Credentials.AccessKeyID.IsZero() != s.Credentials.SecretAccessKey.IsZero() {
+		return errors.New("repository.s3.credentials needs both access_key_id and secret_access_key, or neither for the default credential chain")
+	}
+	return nil
+}
+
+// loopback reports whether host is the local machine.
+func loopback(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

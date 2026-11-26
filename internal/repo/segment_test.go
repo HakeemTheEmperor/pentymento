@@ -179,7 +179,7 @@ func TestSegmentsWriteOnly(t *testing.T) {
 func TestInsecureSegments(t *testing.T) {
 	be, _ := newLocal(t)
 	ctx := context.Background()
-	r, err := Create(ctx, be, NewConfig(true, time.Now()), nil, nil)
+	r, err := Create(ctx, be, NewConfig(true, true, time.Now()), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

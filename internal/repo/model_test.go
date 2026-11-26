@@ -84,7 +84,7 @@ func newModelRun(t *testing.T, rt *rapid.T, be backend.Backend, cleanTemp func()
 	if err != nil {
 		rt.Fatal(err)
 	}
-	if _, err := Create(context.Background(), be, NewConfig(false, time.Now()), mat, []*crypto.Slot{full, other}); err != nil {
+	if _, err := Create(context.Background(), be, NewConfig(false, true, time.Now()), mat, []*crypto.Slot{full, other}); err != nil {
 		rt.Fatal(err)
 	}
 	m := &modelRun{t: t, be: be, cleanTemp: cleanTemp, seen: seen, keys: mat.Unlocked(), snaps: map[string]recipe{}, pins: map[string]pinState{}}

@@ -54,7 +54,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := Create(context.Background(), be, NewConfig(false, time.Now()), m, []*crypto.Slot{full, agent})
+	r, err := Create(context.Background(), be, NewConfig(false, true, time.Now()), m, []*crypto.Slot{full, agent})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestCreateAndOpen(t *testing.T) {
 
 func TestCreateTwice(t *testing.T) {
 	f := newFixture(t)
-	_, err := Create(context.Background(), f.be, NewConfig(false, time.Now()), f.material, []*crypto.Slot{f.full})
+	_, err := Create(context.Background(), f.be, NewConfig(false, true, time.Now()), f.material, []*crypto.Slot{f.full})
 	wantMsgID(t, err, IDExists)
 }
 
@@ -169,7 +169,7 @@ func TestFormatVersionRefusal(t *testing.T) {
 }
 
 func TestParseConfigRejects(t *testing.T) {
-	good, _ := json.Marshal(NewConfig(false, time.Now()))
+	good, _ := json.Marshal(NewConfig(false, true, time.Now()))
 	mutate := func(f func(map[string]any)) []byte {
 		var m map[string]any
 		_ = json.Unmarshal(good, &m)
@@ -437,7 +437,7 @@ func TestInsecureRepository(t *testing.T) {
 	dir := t.TempDir()
 	be, _ := local.New(dir)
 	ctx := context.Background()
-	r, err := Create(ctx, be, NewConfig(true, time.Now()), nil, nil)
+	r, err := Create(ctx, be, NewConfig(true, true, time.Now()), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +454,7 @@ func TestInsecureRepository(t *testing.T) {
 	if !strings.Contains(string(raw), `"dev"`) {
 		t.Error("insecure repository did not store plaintext")
 	}
-	if _, err := Create(ctx, be, NewConfig(false, time.Now()), nil, nil); err == nil {
+	if _, err := Create(ctx, be, NewConfig(false, true, time.Now()), nil, nil); err == nil {
 		t.Error("encrypted repository created without keys")
 	}
 }
@@ -525,5 +525,35 @@ func TestJournalClockBehind(t *testing.T) {
 	recent, err := f.repo.Journal(ctx, f.repo.Config().Created.Add(-time.Hour), "")
 	if err != nil || len(recent) != 0 {
 		t.Errorf("Journal since the repository was created = %+v, %v", recent, err)
+	}
+}
+
+// TestConditionalCreateRecorded: a repository on storage without
+// conditional create is opened with the check-then-put fallback; one
+// without the field (older repositories) is taken to have it.
+func TestConditionalCreateRecorded(t *testing.T) {
+	ctx := context.Background()
+	for _, cc := range []bool{true, false} {
+		be, _ := local.New(t.TempDir())
+		if _, err := Create(ctx, be, NewConfig(true, cc, time.Now()), nil, nil); err != nil {
+			t.Fatal(err)
+		}
+		r, err := Open(ctx, be)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Config().HasConditionalCreate() != cc || r.Backend().Capabilities().ConditionalCreate != cc {
+			t.Errorf("recorded %v: config says %v, backend %v", cc, r.Config().HasConditionalCreate(), r.Backend().Capabilities().ConditionalCreate)
+		}
+	}
+	c := NewConfig(false, true, time.Now())
+	c.ConditionalCreate = nil
+	b, _ := json.Marshal(c)
+	if strings.Contains(string(b), "conditional_create") {
+		t.Errorf("an absent field is written: %s", b)
+	}
+	parsed, err := ParseConfig(b)
+	if err != nil || !parsed.HasConditionalCreate() {
+		t.Errorf("a config without the field: %+v, %v", parsed, err)
 	}
 }

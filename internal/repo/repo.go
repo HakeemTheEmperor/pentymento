@@ -81,6 +81,11 @@ func Create(ctx context.Context, be backend.Backend, cfg Config, m *crypto.Mater
 	if err := be.Put(ctx, configKey, bytes.NewReader(cb), backend.PutOptions{IfNotExists: true}); err != nil {
 		return nil, existsOr(err)
 	}
+	if !cfg.HasConditionalCreate() {
+		// init found the storage ignores conditional create: check, then
+		// put, and let locks and leases use their fallback.
+		be = backend.WithoutConditionalCreate(be)
+	}
 	r := &Repository{be: be, cfg: cfg}
 	if cfg.Insecure() {
 		r.unlocked, r.scope = true, crypto.ScopeFull
@@ -131,6 +136,11 @@ func Open(ctx context.Context, be backend.Backend) (*Repository, error) {
 	cfg, err := ParseConfig(b)
 	if err != nil {
 		return nil, err
+	}
+	if !cfg.HasConditionalCreate() {
+		// init found the storage ignores conditional create: check, then
+		// put, and let locks and leases use their fallback.
+		be = backend.WithoutConditionalCreate(be)
 	}
 	r := &Repository{be: be, cfg: cfg}
 	if cfg.Insecure() {

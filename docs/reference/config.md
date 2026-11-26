@@ -25,6 +25,11 @@ Unknown keys are rejected with the file and line, so a misspelt key never passes
 | `include` | Files applied before this one (see below) |
 | `allow_plaintext_secrets` | Allow secret values written in the file; default `false` |
 | `repository.path` | The repository directory on local storage; must be absolute |
+| `repository.s3.bucket`, `.prefix` | The S3 bucket holding the repository, and an optional prefix ("directory") inside it. Set `repository.path` or `repository.s3`, not both |
+| `repository.s3.region` | The bucket's region; S3-compatible services expect a fixed value, such as `us-east-1` or `auto` |
+| `repository.s3.endpoint` | An S3-compatible service's URL; empty means AWS. It must use `https`, except on the loopback interface |
+| `repository.s3.path_style` | Put the bucket in the URL path rather than the host name, as MinIO and some other services need; default `false` |
+| `repository.s3.credentials.access_key_id`, `.secret_access_key` | [Secret references](#secrets) to static keys; leave both out to use the AWS default credential chain |
 | `repository.key` | A [secret reference](#secrets) to what unlocks a key slot when there is no terminal to ask in |
 | `targets.<name>.engine` | `postgres` or `mongodb` |
 | `targets.<name>.host`, `.port`, `.database` | Where the Postgres server is; `host` may be a Unix socket directory; empty values use the libpq defaults |
@@ -69,6 +74,27 @@ repository:
 ```
 
 - `path` is where `pentym init` creates the repository and where every other command finds it.
+
+A repository can be in an S3-compatible bucket instead: AWS S3, MinIO, Cloudflare R2, Backblaze B2, Wasabi or DigitalOcean Spaces.
+
+```yaml
+repository:
+  s3:
+    bucket: acme-pentym
+    prefix: prod
+    region: eu-west-1
+    endpoint: https://minio.internal:9000   # S3-compatible services only
+    path_style: true                        # if the service needs it
+    credentials:                            # or leave out for the default chain
+      access_key_id: env:PENTYM_S3_KEY_ID
+      secret_access_key: env:PENTYM_S3_SECRET
+  key: env:PENTYM_KEY
+```
+
+- Without `credentials`, pentym uses the AWS default credential chain: the `AWS_*` environment variables, the shared configuration and credentials files, then instance roles, IRSA or OIDC web identity. These need no secret in the config.
+- pentym needs the bucket to support conditional writes (`If-None-Match: *` on `PUT`). `pentym init` tests this and records the result in the repository; on storage without it, locks and capture leases use a weaker fallback ([PTM-3005](../errors/PTM-3005.md)).
+- Objects up to 16 MiB are sent in one request, larger ones in 16 MiB parts. Requests are retried on throttling, server errors and network errors, with backoff from 1 second to 5 minutes, and at most 16 run at once.
+- **Egress costs.** Restores, verification and `pentym check --full` read data back from the bucket, which most providers charge for (egress). Prices differ widely: Cloudflare R2 charges nothing for egress, and AWS S3 charges per GB read out of the region. Account for verification reads when choosing a provider.
 - Commands that unlock the repository (such as `pentym key add`) ask for the passphrase in a terminal. Without a terminal (scripts, cron, CI) they read `key` instead; without either they stop with [PTM-4004](../errors/PTM-4004.md).
 - A `key` value that starts with `AGE-SECRET-KEY-` is used as an age identity; anything else as a passphrase or paper recovery code. pentym tries it against every slot of that kind; `--slot <id>` limits it to one.
 

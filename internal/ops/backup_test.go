@@ -161,7 +161,7 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.Create(context.Background(), be, repo.NewConfig(false, time.Now()), m, []*crypto.Slot{full, agent}); err != nil {
+	if _, err := repo.Create(context.Background(), be, repo.NewConfig(false, true, time.Now()), m, []*crypto.Slot{full, agent}); err != nil {
 		t.Fatal(err)
 	}
 	r, err := repo.Open(context.Background(), be)
