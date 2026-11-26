@@ -40,6 +40,16 @@ type Config struct {
 	Encryption string        `json:"encryption"`
 	Chunker    ChunkerConfig `json:"chunker"`
 	Created    time.Time     `json:"created"`
+	// ConditionalCreate records whether init found that the storage
+	// honours conditional create (PRD 7.8). Absent means it does, as in
+	// repositories created before the field existed.
+	ConditionalCreate *bool `json:"conditional_create,omitempty"`
+}
+
+// HasConditionalCreate reports whether the storage honours conditional
+// create, as init recorded it.
+func (c Config) HasConditionalCreate() bool {
+	return c.ConditionalCreate == nil || *c.ConditionalCreate
 }
 
 // ChunkerConfig records the chunk sizes the repository was created with.
@@ -49,8 +59,9 @@ type ChunkerConfig struct {
 	Max int `json:"max"`
 }
 
-// NewConfig returns the config for a new repository.
-func NewConfig(insecure bool, now time.Time) Config {
+// NewConfig returns the config for a new repository on storage that does
+// or does not honour conditional create.
+func NewConfig(insecure, conditionalCreate bool, now time.Time) Config {
 	enc := EncryptionOn
 	if insecure {
 		enc = EncryptionInsecure
@@ -62,6 +73,8 @@ func NewConfig(insecure bool, now time.Time) Config {
 		Encryption: enc,
 		Chunker:    ChunkerConfig{Min: p.Min, Avg: p.Avg, Max: p.Max},
 		Created:    now.UTC().Truncate(time.Second),
+
+		ConditionalCreate: &conditionalCreate,
 	}
 }
 

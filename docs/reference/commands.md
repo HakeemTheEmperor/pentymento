@@ -6,7 +6,7 @@ Secrets never go on the command line. Flags that take a passphrase take a [secre
 
 ## `pentym init`
 
-Creates an encrypted repository at `repository.path` (see [Configuration](config.md#repository)) with:
+Creates an encrypted repository at `repository.path` or in the bucket of `repository.s3` (see [Configuration](config.md#repository)) with:
 
 - at least two **full key slots**, or one full slot and a **paper recovery code**: losing the only way to unlock would make every backup unreadable;
 - an **agent slot**, which can write backups but never read them.
@@ -34,7 +34,7 @@ In a terminal, `init` asks for whatever the flags leave out: the first passphras
 - an agent passphrase equal to a full slot's, because a database host holding it could then unlock everything;
 - a location that already holds a repository ([PTM-3003](../errors/PTM-3003.md)).
 
-It also tests that the storage honours conditional create, by creating the same object twice, and warns if it does not ([PTM-3005](../errors/PTM-3005.md)).
+It also tests that the storage honours conditional create, by creating the same object twice, records the result in the repository, and warns if it does not ([PTM-3005](../errors/PTM-3005.md)). `--insecure-test-mode` works only with a local path.
 
 The paper recovery code is printed on stdout once and stored nowhere: write it down and keep it offline. It is never logged or journaled.
 
@@ -117,7 +117,7 @@ Checks what pentym needs on this machine and prints one row per check:
 | `<engine> tools` | The client tools (`pg_dump`, `pg_restore`, `pg_basebackup`, `initdb`, `pg_ctl`; `mongodump`, `mongorestore`) and their versions |
 | `docker` | Whether the Docker daemon is reachable, and its version |
 | `instance providers` | The `instance_provider` order and what each can start |
-| `repository` | The storage at `repository.path`, its capabilities, and a conditional-create test |
+| `repository` | The repository's storage (a local directory or an S3 bucket), its capabilities, and a conditional-create test compared with what `init` recorded |
 
 With a target, only that target's engine is checked; otherwise the engines of the configured targets, or both when none is configured. Missing tools are failures when targets are configured, warnings otherwise. `doctor` exits with code 1 when a check fails; warnings alone exit 0. Connection and privilege checks for each target come with the engines.
 

@@ -49,7 +49,8 @@ Two exceptions:
   "id": "3f9c2a7d18e04b6f9a1c5d2e7b8f0a14",
   "encryption": "encrypted",
   "chunker": {"min": 262144, "avg": 1048576, "max": 4194304},
-  "created": "2026-11-25T13:00:00Z"
+  "created": "2026-11-25T13:00:00Z",
+  "conditional_create": true
 }
 ```
 
@@ -59,6 +60,7 @@ Two exceptions:
 | `id` | 128 random bits, hexadecimal |
 | `encryption` | `encrypted`, or `insecure-test-mode` for an unencrypted development repository |
 | `chunker` | Chunk sizes in bytes |
+| `conditional_create` | Whether `pentym init` found that the storage honours conditional create. When `false`, every pentym that opens the repository writes "create only if absent" objects by checking first, then writing, and locks and leases use their fallback (see "Locks and leases"). Absent means `true`. |
 
 `config` is written last when a repository is created, so a location without it is not a repository and an interrupted creation can be retried.
 

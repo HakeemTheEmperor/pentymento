@@ -226,7 +226,7 @@ func TestCheckSample(t *testing.T) {
 
 func TestCheckInsecure(t *testing.T) {
 	be, _ := newLocal(t)
-	r, err := Create(context.Background(), be, NewConfig(true, time.Now()), nil, nil)
+	r, err := Create(context.Background(), be, NewConfig(true, true, time.Now()), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

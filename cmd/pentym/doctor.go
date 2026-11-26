@@ -14,12 +14,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/HakeemTheEmperor/pentymento/internal/backend/local"
 	"github.com/HakeemTheEmperor/pentymento/internal/cliout"
 	"github.com/HakeemTheEmperor/pentymento/internal/config"
 	"github.com/HakeemTheEmperor/pentymento/internal/instance"
 	"github.com/HakeemTheEmperor/pentymento/internal/lock"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
+	"github.com/HakeemTheEmperor/pentymento/internal/repo"
 	"github.com/HakeemTheEmperor/pentymento/internal/toolrun"
 )
 
@@ -265,35 +265,53 @@ func doctorProviders(cfg *config.Config, engines []string, versions map[string][
 }
 
 // doctorRepository reports the repository storage's capabilities and
-// tests conditional create.
+// tests conditional create, comparing the result with what init recorded.
 func (a *app) doctorRepository(ctx context.Context, cfg *config.Config) doctorCheck {
 	c := doctorCheck{Check: "repository"}
-	if cfg.Repository.Path == "" {
-		c.Status, c.Result, c.Next = "warning", "no repository.path in the config", "set repository.path, then run pentym init"
+	if !cfg.Repository.Configured() {
+		c.Status, c.Result, c.Next = "warning", "no repository in the config", "set repository.path or repository.s3, then run pentym init"
 		return c
 	}
-	if _, err := os.Stat(cfg.Repository.Path); err != nil {
+	where := "local storage at " + cfg.Repository.Path
+	if s := cfg.Repository.S3; s.IsSet() {
+		where = "S3 bucket " + cfg.Repository.Location()
+		if s.Endpoint != "" {
+			where += " at " + s.Endpoint
+		}
+	} else if _, err := os.Stat(cfg.Repository.Path); err != nil {
 		c.Status, c.Result, c.Next = "warning", cfg.Repository.Path+" does not exist", "pentym init"
 		return c
 	}
-	be, err := local.New(cfg.Repository.Path)
+	be, err := a.openBackend(ctx, cfg)
 	if err != nil {
 		c.Status, c.Result = "failed", err.Error()
 		return c
 	}
-	caps := be.Capabilities()
 	cc, err := lock.TestConditionalCreate(ctx, be)
+	// What init recorded, if there is a repository yet.
+	recorded, known := true, false
+	if r, err := repo.Open(ctx, be); err == nil {
+		recorded, known = r.Config().HasConditionalCreate(), true
+	}
+	caps := be.Capabilities()
 	switch {
 	case err != nil:
-		c.Status, c.Result = "failed", "conditional-create test: "+err.Error()
-		c.Next = "check that pentym's user can write to " + cfg.Repository.Path
+		c.Status, c.Result = "failed", where+"; conditional-create test: "+err.Error()
+		c.Next = "check that pentym can reach and write to " + cfg.Repository.Location()
+	case !cc && known && recorded:
+		c.Status = "warning"
+		c.Result = where + "; conditional create not honoured, but the repository was created on storage that honoured it, so locks and leases do not use their fallback"
+		c.Next = "see docs/errors/PTM-3005"
 	case !cc:
-		c.Status, c.Result = "warning", "local storage; conditional create not honoured"
+		c.Status, c.Result, c.Next = "warning", where+"; conditional create not honoured", "see docs/errors/PTM-3005"
+	case known && !recorded:
+		c.Status = "warning"
+		c.Result = where + "; conditional create: yes (tested), but the repository recorded at init that it was not honoured, so locks and leases use their weaker fallback"
 		c.Next = "see docs/errors/PTM-3005"
 	default:
 		c.Status = "ok"
-		c.Result = fmt.Sprintf("local storage at %s; conditional create: yes (tested); strong consistency: %s; object lock: %s",
-			cfg.Repository.Path, yesNo(caps.StrongConsistency), yesNo(caps.ObjectLock))
+		c.Result = fmt.Sprintf("%s; conditional create: yes (tested); strong consistency: %s; object lock: %s",
+			where, yesNo(caps.StrongConsistency), yesNo(caps.ObjectLock))
 	}
 	return c
 }

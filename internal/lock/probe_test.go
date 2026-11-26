@@ -27,6 +27,9 @@ func TestConditionalCreateProbe(t *testing.T) {
 	}{
 		{"honoured", func(b backend.Backend) backend.Backend { return b }, true},
 		{"ignored", func(b backend.Backend) backend.Backend { return overwriting{b} }, false},
+		// Refused, and emulated by check-then-put: the second create fails
+		// as on real conditional create, but the capability is gone.
+		{"emulated", backend.WithoutConditionalCreate, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			be, _ := newBackend(t)

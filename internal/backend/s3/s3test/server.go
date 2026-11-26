@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Toluwalase Akinyemi
 
-package s3
+package s3test
 
 import (
-	"crypto/md5" // #nosec G501 -- S3 ETags are MD5 by definition
-	"encoding/hex"
 	"encoding/xml"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -19,59 +18,74 @@ import (
 	"time"
 )
 
-// fakeS3 is an in-memory S3 server, path-style, with the calls the
+// Server is an in-memory S3 server, path-style, with the calls the
 // backend makes: objects with conditional PUT and ranged GET, listing
 // with continuation, and multipart uploads. Modes and hooks inject the
-// behaviours of other S3-compatible services and of failures.
-type fakeS3 struct {
-	mu      sync.Mutex
-	objects map[string]fakeObject
-	uploads map[string]map[int][]byte
-	nextID  int
-	// pageSize is the most keys one listing page returns.
-	pageSize int
-
-	// ccMode is "" (honour If-None-Match), "501" (refuse it) or "ignore".
-	ccMode string
-	// fault, if set, may answer a request instead of the server: it
-	// returns true when it wrote a response.
-	fault func(w http.ResponseWriter, r *http.Request) bool
-	// requests counts requests by method and kind.
+// behaviours of other S3-compatible services and of failures. It serves
+// any bucket name and needs no credentials.
+type Server struct {
+	mu       sync.Mutex
+	objects  map[string]object
+	uploads  map[string]map[int][]byte
+	nextID   int
 	requests map[string]int
+
+	// PageSize is the most keys one listing page returns.
+	PageSize int
+	// CCMode is "" (honour If-None-Match), "501" (refuse it) or "ignore".
+	CCMode string
+	// Fault, if set, may answer a request instead of the server: it
+	// returns true when it wrote a response. Set it before requests start.
+	Fault func(w http.ResponseWriter, r *http.Request) bool
 }
 
-type fakeObject struct {
+type object struct {
 	data []byte
 	etag string
 	mod  time.Time
 }
 
-func newFakeS3(t *testing.T) (*fakeS3, string) {
+// New starts a server, stopped when the test ends, and returns it with
+// its URL.
+func New(t testing.TB) (*Server, string) {
 	t.Helper()
-	f := &fakeS3{objects: map[string]fakeObject{}, uploads: map[string]map[int][]byte{}, pageSize: 1000, requests: map[string]int{}}
+	f := &Server{objects: map[string]object{}, uploads: map[string]map[int][]byte{}, PageSize: 1000, requests: map[string]int{}}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return f, srv.URL
 }
 
-func (f *fakeS3) count(kind string) int {
+// Count returns how many requests of a kind the server saw: an HTTP
+// method, or create-multipart, upload-part, complete-multipart,
+// abort-multipart or list.
+func (f *Server) Count(kind string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.requests[kind]
 }
 
-func s3Error(w http.ResponseWriter, status int, code string) {
+// Uploads returns how many multipart uploads are in progress.
+func (f *Server) Uploads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.uploads)
+}
+
+// Error writes an S3 error response.
+func Error(w http.ResponseWriter, status int, code string) {
 	w.Header().Set("Content-Type", "application/xml")
 	w.WriteHeader(status)
 	_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><Error><Code>%s</Code><Message>%s</Message></Error>`, code, code)
 }
 
+// etagOf is an opaque ETag for content; the backend only compares them.
 func etagOf(b []byte) string {
-	sum := md5.Sum(b) // #nosec G401 -- S3 ETag
-	return `"` + hex.EncodeToString(sum[:]) + `"`
+	h := fnv.New64a()
+	_, _ = h.Write(b)
+	return fmt.Sprintf(`"%016x-%d"`, h.Sum64(), len(b))
 }
 
-func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (f *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	_, key, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
 	kind := r.Method
@@ -89,7 +103,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	f.mu.Lock()
 	f.requests[kind]++
-	fault := f.fault
+	fault := f.Fault
 	f.mu.Unlock()
 	if fault != nil && fault(w, r) {
 		return
@@ -108,7 +122,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "upload-part":
 		parts, ok := f.uploads[q.Get("uploadId")]
 		if !ok {
-			s3Error(w, 404, "NoSuchUpload")
+			Error(w, 404, "NoSuchUpload")
 			return
 		}
 		n, _ := strconv.Atoi(q.Get("partNumber"))
@@ -117,7 +131,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "complete-multipart":
 		parts, ok := f.uploads[q.Get("uploadId")]
 		if !ok {
-			s3Error(w, 404, "NoSuchUpload")
+			Error(w, 404, "NoSuchUpload")
 			return
 		}
 		if !f.conditionOK(w, r, key) {
@@ -129,7 +143,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} `xml:"Part"`
 		}
 		if err := xml.Unmarshal(body, &req); err != nil {
-			s3Error(w, 400, "MalformedXML")
+			Error(w, 400, "MalformedXML")
 			return
 		}
 		var data []byte
@@ -137,7 +151,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			data = append(data, parts[p.PartNumber]...)
 		}
 		delete(f.uploads, q.Get("uploadId"))
-		f.objects[key] = fakeObject{data: data, etag: etagOf(data), mod: time.Now()}
+		f.objects[key] = object{data: data, etag: etagOf(data), mod: time.Now()}
 		_, _ = fmt.Fprintf(w, `<?xml version="1.0" encoding="UTF-8"?><CompleteMultipartUploadResult><Key>%s</Key><ETag>%s</ETag></CompleteMultipartUploadResult>`, key, etagOf(data)) // #nosec G705 -- a test server echoing test keys
 	case "abort-multipart":
 		delete(f.uploads, q.Get("uploadId"))
@@ -146,7 +160,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !f.conditionOK(w, r, key) {
 			return
 		}
-		f.objects[key] = fakeObject{data: body, etag: etagOf(body), mod: time.Now()}
+		f.objects[key] = object{data: body, etag: etagOf(body), mod: time.Now()}
 		w.Header().Set("ETag", etagOf(body))
 	case http.MethodHead:
 		o, ok := f.objects[key]
@@ -163,38 +177,38 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		delete(f.objects, key)
 		w.WriteHeader(204)
 	default:
-		s3Error(w, 405, "MethodNotAllowed")
+		Error(w, 405, "MethodNotAllowed")
 	}
 }
 
 // conditionOK applies If-None-Match as the mode says; false means it
 // answered.
-func (f *fakeS3) conditionOK(w http.ResponseWriter, r *http.Request, key string) bool {
+func (f *Server) conditionOK(w http.ResponseWriter, r *http.Request, key string) bool {
 	if r.Header.Get("If-None-Match") != "*" {
 		return true
 	}
-	switch f.ccMode {
+	switch f.CCMode {
 	case "501":
-		s3Error(w, 501, "NotImplemented")
+		Error(w, 501, "NotImplemented")
 		return false
 	case "ignore":
 		return true
 	}
 	if _, exists := f.objects[key]; exists {
-		s3Error(w, 412, "PreconditionFailed")
+		Error(w, 412, "PreconditionFailed")
 		return false
 	}
 	return true
 }
 
-func (f *fakeS3) get(w http.ResponseWriter, r *http.Request, key string) {
+func (f *Server) get(w http.ResponseWriter, r *http.Request, key string) {
 	o, ok := f.objects[key]
 	if !ok {
-		s3Error(w, 404, "NoSuchKey")
+		Error(w, 404, "NoSuchKey")
 		return
 	}
 	if m := r.Header.Get("If-Match"); m != "" && m != o.etag {
-		s3Error(w, 412, "PreconditionFailed")
+		Error(w, 412, "PreconditionFailed")
 		return
 	}
 	size := int64(len(o.data))
@@ -207,7 +221,7 @@ func (f *fakeS3) get(w http.ResponseWriter, r *http.Request, key string) {
 			end, _ = strconv.ParseInt(b, 10, 64)
 		}
 		if start >= size {
-			s3Error(w, 416, "InvalidRange")
+			Error(w, 416, "InvalidRange")
 			return
 		}
 		end = min(end, size-1)
@@ -220,7 +234,7 @@ func (f *fakeS3) get(w http.ResponseWriter, r *http.Request, key string) {
 	_, _ = w.Write(o.data[start : end+1])
 }
 
-func (f *fakeS3) list(w http.ResponseWriter, prefix, token string) {
+func (f *Server) list(w http.ResponseWriter, prefix, token string) {
 	var keys []string
 	for k := range f.objects {
 		if strings.HasPrefix(k, prefix) && k > token {
@@ -228,9 +242,9 @@ func (f *fakeS3) list(w http.ResponseWriter, prefix, token string) {
 		}
 	}
 	sort.Strings(keys)
-	truncated := len(keys) > f.pageSize
+	truncated := len(keys) > f.PageSize
 	if truncated {
-		keys = keys[:f.pageSize]
+		keys = keys[:f.PageSize]
 	}
 	var sb strings.Builder
 	sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?><ListBucketResult>`)

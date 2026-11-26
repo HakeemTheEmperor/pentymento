@@ -13,6 +13,7 @@ import (
 
 	"github.com/HakeemTheEmperor/pentymento/internal/backend"
 	"github.com/HakeemTheEmperor/pentymento/internal/backend/local"
+	"github.com/HakeemTheEmperor/pentymento/internal/backend/s3"
 	"github.com/HakeemTheEmperor/pentymento/internal/cliout"
 	"github.com/HakeemTheEmperor/pentymento/internal/config"
 	"github.com/HakeemTheEmperor/pentymento/internal/crypto"
@@ -39,18 +40,44 @@ func (a *app) repoConfig() (*config.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	if cfg.Repository.Path == "" {
+	if !cfg.Repository.Configured() {
 		return nil, &msg.Error{Code: msg.ExitConfig, Message: msg.Message{
 			Level: msg.LevelFailed, ID: idRepoNotConfigured,
 			Fact: "no repository location in " + a.configPath(),
-			Next: "set repository.path to an absolute directory in the config",
+			Next: "set repository.path to an absolute directory, or repository.s3 to a bucket, in the config",
 		}}
 	}
 	return cfg, nil
 }
 
-// openBackend returns the storage backend for the configured repository.
-func openBackend(cfg *config.Config) (backend.Backend, error) {
+// openBackend returns the storage backend for the configured repository:
+// a local directory or an S3-compatible bucket.
+func (a *app) openBackend(ctx context.Context, cfg *config.Config) (backend.Backend, error) {
+	if s := cfg.Repository.S3; s.IsSet() {
+		o := s3.Options{Bucket: s.Bucket, Prefix: s.Prefix, Region: s.Region, Endpoint: s.Endpoint, PathStyle: s.PathStyle}
+		if !s.Credentials.AccessKeyID.IsZero() {
+			id, err := a.resolver().Resolve(ctx, "", s.Credentials.AccessKeyID)
+			if err != nil {
+				return nil, err
+			}
+			defer id.Clear()
+			key, err := a.resolver().Resolve(ctx, "", s.Credentials.SecretAccessKey)
+			if err != nil {
+				return nil, err
+			}
+			o.AccessKeyID, o.SecretAccessKey = string(id.Expose()), key
+		}
+		be, err := s3.New(ctx, o)
+		if err != nil {
+			return nil, &msg.Error{Code: msg.ExitConfig, Err: err, Message: msg.Message{
+				Level: msg.LevelFailed,
+				Fact:  "cannot set up the repository bucket " + cfg.Repository.Location(),
+				Cause: err.Error(),
+				Next:  "check repository.s3 in the config",
+			}}
+		}
+		return be, nil
+	}
 	be, err := local.New(cfg.Repository.Path)
 	if err != nil {
 		return nil, &msg.Error{Code: msg.ExitAccess, Err: err, Message: msg.Message{
@@ -69,14 +96,16 @@ func (a *app) openRepo(ctx context.Context) (*config.Config, *repo.Repository, e
 	if err != nil {
 		return nil, nil, err
 	}
-	if _, err := os.Stat(cfg.Repository.Path); errors.Is(err, os.ErrNotExist) {
-		return nil, nil, &msg.Error{Code: msg.ExitNotFound, Err: err, Message: msg.Message{
-			Level: msg.LevelFailed, ID: repo.IDNotFound,
-			Fact: "no repository found at " + cfg.Repository.Path + " (the directory does not exist)",
-			Next: "check repository.path in the config, or create a repository with pentym init",
-		}}
+	if p := cfg.Repository.Path; p != "" {
+		if _, err := os.Stat(p); errors.Is(err, os.ErrNotExist) {
+			return nil, nil, &msg.Error{Code: msg.ExitNotFound, Err: err, Message: msg.Message{
+				Level: msg.LevelFailed, ID: repo.IDNotFound,
+				Fact: "no repository found at " + p + " (the directory does not exist)",
+				Next: "check repository.path in the config, or create a repository with pentym init",
+			}}
+		}
 	}
-	be, err := openBackend(cfg)
+	be, err := a.openBackend(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}

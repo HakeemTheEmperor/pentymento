@@ -21,6 +21,7 @@ import (
 
 	"github.com/HakeemTheEmperor/pentymento/internal/backend"
 	"github.com/HakeemTheEmperor/pentymento/internal/backend/backendtest"
+	"github.com/HakeemTheEmperor/pentymento/internal/backend/s3/s3test"
 	"github.com/HakeemTheEmperor/pentymento/internal/secrets"
 )
 
@@ -41,11 +42,11 @@ func testOptions(url string) Options {
 	}
 }
 
-func newFake(t *testing.T, mode string, edit func(*Options)) (*Backend, *fakeS3) {
+func newFake(t *testing.T, mode string, edit func(*Options)) (*Backend, *s3test.Server) {
 	t.Helper()
-	f, url := newFakeS3(t)
-	f.ccMode = mode
-	f.pageSize = 100
+	f, url := s3test.New(t)
+	f.CCMode = mode
+	f.PageSize = 100
 	o := testOptions(url)
 	if edit != nil {
 		edit(&o)
@@ -122,7 +123,7 @@ func TestRefusedConditionalCreate(t *testing.T) {
 	if got := get(t, b2, "data/big", nil); !bytes.Equal(got, big) {
 		t.Errorf("multipart object is %d bytes", len(got))
 	}
-	if f.count("complete-multipart") != 0 {
+	if f.Count("complete-multipart") != 0 {
 		t.Errorf("the first fake saw multipart uploads")
 	}
 }
@@ -137,7 +138,7 @@ func TestMultipart(t *testing.T) {
 	if err := put(t, b, "data/ab/pack", data, true); err != nil {
 		t.Fatal(err)
 	}
-	if n := f.count("upload-part"); n != 3 {
+	if n := f.Count("upload-part"); n != 3 {
 		t.Errorf("%d parts uploaded, want 3", n)
 	}
 	if got := get(t, b, "data/ab/pack", nil); !bytes.Equal(got, data) {
@@ -150,7 +151,7 @@ func TestMultipart(t *testing.T) {
 	if err := put(t, b, "data/ab/exact", data[:minPartSize], false); err != nil {
 		t.Fatal(err)
 	}
-	if n := f.count("upload-part"); n != 3 {
+	if n := f.Count("upload-part"); n != 3 {
 		t.Errorf("an object of exactly the part size was uploaded in parts (%d parts in total)", n)
 	}
 	// A second conditional create of a multipart object fails and leaves
@@ -158,8 +159,8 @@ func TestMultipart(t *testing.T) {
 	if err := put(t, b, "data/ab/pack", data, true); !errors.Is(err, backend.ErrExists) {
 		t.Errorf("second create = %v", err)
 	}
-	if len(f.uploads) != 0 {
-		t.Errorf("%d multipart uploads left", len(f.uploads))
+	if f.Uploads() != 0 {
+		t.Errorf("%d multipart uploads left", f.Uploads())
 	}
 	// A reader that fails in the second part aborts the upload.
 	cut := errors.New("connection reset")
@@ -167,8 +168,8 @@ func TestMultipart(t *testing.T) {
 	if err := b.Put(context.Background(), "data/ab/cut", r, backend.PutOptions{}); !errors.Is(err, cut) {
 		t.Errorf("interrupted multipart = %v", err)
 	}
-	if _, err := b.Stat(context.Background(), "data/ab/cut"); !errors.Is(err, backend.ErrNotFound) || len(f.uploads) != 0 {
-		t.Errorf("an interrupted multipart left an object (%v) or %d uploads", err, len(f.uploads))
+	if _, err := b.Stat(context.Background(), "data/ab/cut"); !errors.Is(err, backend.ErrNotFound) || f.Uploads() != 0 {
+		t.Errorf("an interrupted multipart left an object (%v) or %d uploads", err, f.Uploads())
 	}
 }
 
@@ -182,9 +183,9 @@ func TestRetries(t *testing.T) {
 	b, f := newFake(t, "", nil)
 	var failures atomic.Int32
 	failures.Store(2)
-	f.fault = func(w http.ResponseWriter, r *http.Request) bool {
+	f.Fault = func(w http.ResponseWriter, r *http.Request) bool {
 		if r.Method == http.MethodPut && failures.Add(-1) >= 0 {
-			s3Error(w, 503, "SlowDown")
+			s3test.Error(w, 503, "SlowDown")
 			return true
 		}
 		return false
@@ -192,14 +193,14 @@ func TestRetries(t *testing.T) {
 	if err := put(t, b, "data/x", []byte("x"), true); err != nil {
 		t.Fatalf("after two throttled attempts: %v", err)
 	}
-	if n := f.count(http.MethodPut); n != 3 {
+	if n := f.Count(http.MethodPut); n != 3 {
 		t.Errorf("%d PUTs, want 3", n)
 	}
 	failures.Store(100)
 	if err := put(t, b, "data/y", []byte("y"), false); err == nil || !strings.Contains(err.Error(), "SlowDown") {
 		t.Errorf("throttled every time = %v", err)
 	}
-	if n := f.count(http.MethodPut); n != 3+4 {
+	if n := f.Count(http.MethodPut); n != 3+4 {
 		t.Errorf("%d PUTs in total, want 7 (the attempt limit is 4)", n)
 	}
 }
@@ -210,10 +211,10 @@ func TestRetries(t *testing.T) {
 func TestLostResponse(t *testing.T) {
 	b, f := newFake(t, "", nil)
 	var lost atomic.Bool
-	f.fault = func(w http.ResponseWriter, r *http.Request) bool {
+	f.Fault = func(w http.ResponseWriter, r *http.Request) bool {
 		if r.Method == http.MethodPut && lost.CompareAndSwap(false, true) {
 			f.ServeHTTP(httptest.NewRecorder(), r) // the write happens
-			s3Error(w, http.StatusInternalServerError, "InternalError")
+			s3test.Error(w, http.StatusInternalServerError, "InternalError")
 			return true
 		}
 		return false
@@ -234,7 +235,7 @@ func TestBrokenBody(t *testing.T) {
 		t.Fatal(err)
 	}
 	var broken atomic.Bool
-	f.fault = func(w http.ResponseWriter, r *http.Request) bool {
+	f.Fault = func(w http.ResponseWriter, r *http.Request) bool {
 		if r.Method == http.MethodGet && strings.Contains(r.Header.Get("Range"), "bytes=65536-") && broken.CompareAndSwap(false, true) {
 			w.Header().Set("Content-Length", "65536")
 			w.Header().Set("Content-Range", "bytes 65536-131071/300000")
@@ -281,7 +282,7 @@ func TestConcurrencyBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	var inFlight, peak atomic.Int32
-	f.fault = func(http.ResponseWriter, *http.Request) bool {
+	f.Fault = func(http.ResponseWriter, *http.Request) bool {
 		n := inFlight.Add(1)
 		for {
 			p := peak.Load()

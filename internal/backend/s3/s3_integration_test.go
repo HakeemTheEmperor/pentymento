@@ -22,47 +22,23 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/testcontainers/testcontainers-go"
-	tcminio "github.com/testcontainers/testcontainers-go/modules/minio"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/backend"
 	"github.com/HakeemTheEmperor/pentymento/internal/backend/backendtest"
+	"github.com/HakeemTheEmperor/pentymento/internal/backend/s3/s3test"
+	"github.com/HakeemTheEmperor/pentymento/internal/devtools/dbtest"
 	"github.com/HakeemTheEmperor/pentymento/internal/secrets"
 )
-
-// minioImage supports conditional writes (If-None-Match) on PUT and on
-// multipart completion.
-const minioImage = "quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
 
 // startMinIO starts MinIO with one bucket and returns options for it.
 func startMinIO(t *testing.T) Options {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
-	pw := make([]byte, 16)
-	_, _ = rand.Read(pw)
-	c, err := tcminio.Run(ctx, minioImage, tcminio.WithUsername("pentym"), tcminio.WithPassword(hex.EncodeToString(pw)))
-	testcontainers.CleanupContainer(t, c)
-	if err != nil {
-		t.Fatalf("start MinIO: %v", err)
-	}
-	addr, err := c.ConnectionString(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	o := Options{
-		Bucket: "pentym", Region: "us-east-1", Endpoint: "http://" + addr, PathStyle: true,
-		AccessKeyID: c.Username, SecretAccessKey: secrets.New([]byte(c.Password)),
+	m := dbtest.StartMinIO(t)
+	return Options{
+		Bucket: m.Bucket, Region: "us-east-1", Endpoint: m.Endpoint, PathStyle: true,
+		AccessKeyID: m.AccessKey, SecretAccessKey: secrets.New([]byte(m.SecretKey)),
 		MaxAttempts: 10, MinBackoff: 10 * time.Millisecond, MaxBackoff: 200 * time.Millisecond,
 	}
-	b, err := New(ctx, o)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := b.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(o.Bucket)}); err != nil {
-		t.Fatalf("create the bucket: %v", err)
-	}
-	return o
 }
 
 // under returns a backend for a fresh prefix of the bucket, so each
@@ -99,12 +75,12 @@ func TestMinIOConformance(t *testing.T) {
 			mu.Unlock()
 			switch roll {
 			case 0:
-				s3Error(w, http.StatusServiceUnavailable, "SlowDown")
+				s3test.Error(w, http.StatusServiceUnavailable, "SlowDown")
 			case 1:
-				s3Error(w, http.StatusInternalServerError, "InternalError")
+				s3test.Error(w, http.StatusInternalServerError, "InternalError")
 			case 2:
 				proxy.ServeHTTP(httptest.NewRecorder(), r)
-				s3Error(w, http.StatusBadGateway, "BadGateway")
+				s3test.Error(w, http.StatusBadGateway, "BadGateway")
 			default:
 				proxy.ServeHTTP(w, r)
 			}

@@ -83,7 +83,12 @@ func (a *app) runInit(cmd *cobra.Command, f *initFlags) error {
 	if err != nil {
 		return err
 	}
-	be, err := openBackend(cfg)
+	if f.insecure {
+		if err := crypto.CheckInsecureTestMode(cfg.Repository.Path != ""); err != nil {
+			return err
+		}
+	}
+	be, err := a.openBackend(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -91,10 +96,7 @@ func (a *app) runInit(cmd *cobra.Command, f *initFlags) error {
 		return err
 	}
 	if f.insecure {
-		if err := crypto.CheckInsecureTestMode(true); err != nil { // only local storage exists so far
-			return err
-		}
-		return a.createRepo(ctx, be, cfg.Repository.Path, true, nil, nil, secrets.Secret{}, secrets.Ref{})
+		return a.createRepo(ctx, be, cfg.Repository.Location(), true, nil, nil, secrets.Secret{}, secrets.Ref{})
 	}
 
 	plan, err := a.planSlots(cmd, f)
@@ -111,7 +113,7 @@ func (a *app) runInit(cmd *cobra.Command, f *initFlags) error {
 		return err
 	}
 	defer paper.Clear()
-	return a.createRepo(ctx, be, cfg.Repository.Path, false, m, slots, paper, plan.cred)
+	return a.createRepo(ctx, be, cfg.Repository.Location(), false, m, slots, paper, plan.cred)
 }
 
 // slotPlan is the slots init will create, with their secrets.
@@ -303,7 +305,7 @@ func (a *app) createRepo(ctx context.Context, be backend.Backend, location strin
 		return err
 	}
 	start := time.Now()
-	r, err := repo.Create(ctx, be, repo.NewConfig(insecure, start), m, slots)
+	r, err := repo.Create(ctx, be, repo.NewConfig(insecure, cc, start), m, slots)
 	if err != nil {
 		return err
 	}
