@@ -22,10 +22,25 @@ var ErrCorrupt = errors.New("repository data is corrupt")
 // keyCacheSize bounds the unwrapped data keys kept while reading.
 const keyCacheSize = 64
 
-// ReadSnapshot writes a snapshot's stream to w, chunk by chunk, checking
-// every chunk against its ID. Memory stays bounded whatever the snapshot's
-// size. It needs a full key slot.
+// ReadSnapshot writes a snapshot's main stream to w, chunk by chunk,
+// checking every chunk against its ID. Memory stays bounded whatever the
+// snapshot's size. It needs a full key slot.
 func (r *Repository) ReadSnapshot(ctx context.Context, idx *Index, s *Snapshot, w io.Writer) error {
+	return r.readStream(ctx, idx, s, s.List, w)
+}
+
+// ReadPart writes one of a snapshot's streams to w: the main stream (by
+// its name) or a further part.
+func (r *Repository) ReadPart(ctx context.Context, idx *Index, s *Snapshot, name string, w io.Writer) error {
+	for _, p := range s.streams() {
+		if p.Name == name {
+			return r.readStream(ctx, idx, s, p.List, w)
+		}
+	}
+	return fmt.Errorf("snapshot %s has no part %q", s.ID, name)
+}
+
+func (r *Repository) readStream(ctx context.Context, idx *Index, s *Snapshot, list []string, w io.Writer) error {
 	if !r.CanRead() {
 		return ErrNoPrivateKey
 	}
@@ -34,7 +49,7 @@ func (r *Repository) ReadSnapshot(ctx context.Context, idx *Index, s *Snapshot, 
 		return err
 	}
 	defer cr.close()
-	for _, lid := range s.List {
+	for _, lid := range list {
 		id, err := chunker.ParseID(lid)
 		if err != nil {
 			return fmt.Errorf("snapshot %s: %w", s.ID, err)

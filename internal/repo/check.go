@@ -300,7 +300,21 @@ func (c *checker) snapshots(ctx context.Context) error {
 	return nil
 }
 
+// snapshot checks every stream of a snapshot: its main stream and parts.
 func (c *checker) snapshot(ctx context.Context, cr *chunkReader, key string, s *Snapshot) error {
+	for _, p := range s.streams() {
+		if err := c.stream(ctx, cr, key, p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// stream checks one stream's chunk lists and chunks.
+func (c *checker) stream(ctx context.Context, cr *chunkReader, key string, s Part) error {
+	if s.Name != "" {
+		key += " (" + s.Name + ")"
+	}
 	var chunks int64
 	missing := 0
 	for _, lid := range s.List {

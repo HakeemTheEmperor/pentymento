@@ -1,6 +1,6 @@
 # Commands
 
-Every command has `--help` with examples, prints its result on stdout (as JSON with `--json`), and exits with a stable [exit code](exit-codes.md). This page covers the commands that are built so far: `init`, `key`, `check`, `repo` and `doctor`.
+Every command has `--help` with examples, prints its result on stdout (as JSON with `--json`), and exits with a stable [exit code](exit-codes.md). This page covers the commands that are built so far: `init`, `key`, `check`, `repo`, `doctor`, `backup` and `list`.
 
 Secrets never go on the command line. Flags that take a passphrase take a [secret reference](config.md#secrets) such as `env:NAME` or `file:/path`, and refuse a plain value. In a terminal, pentym asks for passphrases instead, without echoing them.
 
@@ -120,3 +120,21 @@ Checks what pentym needs on this machine and prints one row per check:
 | `repository` | The storage at `repository.path`, its capabilities, and a conditional-create test |
 
 With a target, only that target's engine is checked; otherwise the engines of the configured targets, or both when none is configured. Missing tools are failures when targets are configured, warnings otherwise. `doctor` exits with code 1 when a check fails; warnings alone exit 0. Connection and privilege checks for each target come with the engines.
+
+## `pentym backup <target>`
+
+Takes a base backup of a target and commits it as a snapshot (SDD 6.1):
+
+1. Checks the connection and the backup role's privileges, as `doctor` does; a failure stops the backup, warnings are printed.
+2. Takes a shared repository lock, so prune's garbage collection cannot run at the same time.
+3. Records the target's inventory, then streams the backup straight into the repository: chunked, deduplicated, compressed, encrypted and packed. Nothing is written to temporary files, and memory stays constant whatever the database's size.
+4. Commits the snapshot only if the backup finished cleanly. A failed or cancelled backup commits nothing; the packs it uploaded are removed by a later prune.
+5. Journals the outcome.
+
+For Postgres, the backup uses `BASE_BACKUP` over a replication connection, falling back to `pg_basebackup` for clusters without tablespaces. It includes the WAL the snapshot needs to restore on its own, and a temporary replication slot keeps the server from removing that WAL during the backup. Each archive (`base.tar`, one per tablespace, and the backup manifest) is stored as its own stream.
+
+It unlocks the repository with any key slot; an agent slot is enough. It prints the snapshot ID on stdout, and with `--json` the snapshot and what the backup stored. `--now`, which runs the backup through the agent, is not built yet. MongoDB backups are not built yet.
+
+## `pentym list`
+
+Lists the snapshots, oldest first: ID, target, engine and version, start time, duration, size of all its streams, and whether it is pinned (with the reason). `--json` adds the log positions, the timeline, the streams and the backup method. It unlocks the repository with any key slot. Log coverage is added with continuous capture.

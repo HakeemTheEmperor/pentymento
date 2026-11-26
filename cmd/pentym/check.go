@@ -10,6 +10,7 @@ import (
 
 	"github.com/HakeemTheEmperor/pentymento/internal/cliout"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
+	"github.com/HakeemTheEmperor/pentymento/internal/ops"
 	"github.com/HakeemTheEmperor/pentymento/internal/repo"
 )
 
@@ -103,7 +104,7 @@ func (a *app) runCheck(cmd *cobra.Command, f *checkFlags, target string) error {
 
 	var rep *repo.CheckReport
 	op := beginTargetOp(r, "check", tid, cfg.Repository.Key)
-	err = withLock(ctx, r, false, func() error {
+	err = ops.WithLock(ctx, r, false, func() error {
 		var err error
 		rep, err = r.Check(ctx, repo.CheckOptions{Target: tid, Sample: f.sample / 100, Full: f.full})
 		return err

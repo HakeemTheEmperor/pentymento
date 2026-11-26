@@ -16,7 +16,6 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/cliout"
 	"github.com/HakeemTheEmperor/pentymento/internal/config"
 	"github.com/HakeemTheEmperor/pentymento/internal/crypto"
-	"github.com/HakeemTheEmperor/pentymento/internal/lock"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
 	"github.com/HakeemTheEmperor/pentymento/internal/repo"
 	"github.com/HakeemTheEmperor/pentymento/internal/secrets"
@@ -163,28 +162,6 @@ func beginOp(r *repo.Repository, operation string, cred secrets.Ref) *repo.Opera
 // ID), or on the whole repository when tid is empty.
 func beginTargetOp(r *repo.Repository, operation, tid string, cred secrets.Ref) *repo.Operation {
 	return r.BeginOperation(repo.CurrentIdentity(), operation, tid, telemetry.NewRunID(), cred)
-}
-
-// withLock runs fn holding the repository's shared or exclusive lock,
-// refreshed while fn runs and released afterwards.
-func withLock(ctx context.Context, r *repo.Repository, exclusive bool, fn func() error) error {
-	id := repo.CurrentIdentity()
-	m := lock.NewLocks(r.Backend(), lock.CurrentHolder(id.User, id.Host, ""))
-	acquire := m.AcquireShared
-	if exclusive {
-		acquire = m.AcquireExclusive
-	}
-	l, err := acquire(ctx)
-	if err != nil {
-		return err
-	}
-	stop := l.KeepFresh(ctx, lock.LockRefresh)
-	err = fn()
-	stop()
-	if rerr := l.Release(context.WithoutCancel(ctx)); err == nil {
-		err = rerr
-	}
-	return err
 }
 
 // finishOp records how an operation ended. A failure to write the entry is

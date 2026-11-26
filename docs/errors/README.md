@@ -27,6 +27,12 @@ IDs are permanent: an ID is never reused and never changes meaning.
 | [PTM-1007](PTM-1007.md) | secret-command-failed |
 | [PTM-1008](PTM-1008.md) | config-not-found |
 | [PTM-1009](PTM-1009.md) | repository-not-configured |
+| [PTM-2001](PTM-2001.md) | postgres-connect-failed |
+| [PTM-2002](PTM-2002.md) | postgres-version-unsupported |
+| [PTM-2003](PTM-2003.md) | postgres-replication-missing |
+| [PTM-2004](PTM-2004.md) | postgres-role-too-privileged |
+| [PTM-2005](PTM-2005.md) | postgres-wal-level-minimal |
+| [PTM-2006](PTM-2006.md) | postgres-replication-refused |
 | [PTM-3001](PTM-3001.md) | repository-format-newer |
 | [PTM-3002](PTM-3002.md) | repository-not-found |
 | [PTM-3003](PTM-3003.md) | repository-exists |
