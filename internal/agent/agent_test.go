@@ -217,11 +217,13 @@ func TestOneHolder(t *testing.T) {
 		t.Fatalf("the leases moved while a was renewing: %v", h.log)
 	}
 
-	stopped := time.Now()
 	a.stop(t)
+	// a has stopped, so its releases are written: b takes over on its next
+	// check, not after the lease length.
+	stopped := time.Now()
 	waitFor(t, "b to take over", 5*time.Second, func() bool { return h.holder("prod-pg") == "b" && h.holder("prod-mg") == "b" })
 	if took := time.Since(stopped); took >= fastTimings.Length {
-		t.Errorf("b took over after %s; a released lease is taken over at once", took)
+		t.Errorf("b took over %s after a stopped; a released lease is taken over at once", took)
 	}
 	// a's last heartbeat says it stopped; b's says it runs.
 	hbs, err := openAs(t, dir, nil, "agent").LatestHeartbeats(context.Background())

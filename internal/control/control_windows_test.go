@@ -10,12 +10,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-// TestPipeAccessList: the pipe admits only the agent's user,
-// Administrators and SYSTEM, with no inherited entries.
+// TestPipeAccessList: the pipe admits exactly the agent's user,
+// Administrators and SYSTEM, with no inherited entries. It compares SIDs,
+// not SDDL text, which abbreviates well-known accounts (a runner's built-in
+// Administrator prints as LA).
 func TestPipeAccessList(t *testing.T) {
 	_, addr := serve(t, testServer(&fakeAgent{}))
 	// Reading the access list opens the pipe like a client; until the
@@ -32,18 +35,53 @@ func TestPipeAccessList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !strings.HasPrefix(sd.String(), "D:P") {
+		t.Errorf("the access list inherits entries: %s", sd)
+	}
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		t.Fatal(err)
 	}
-	sddl := sd.String()
-	if !strings.Contains(sddl, "D:P") || !strings.Contains(sddl, user.User.Sid.String()) ||
-		!strings.Contains(sddl, ";;;BA)") || !strings.Contains(sddl, ";;;SY)") {
-		t.Errorf("access list = %s", sddl)
+	admins, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, other := range []string{";;;WD)", ";;;AU)", ";;;BU)", ";;;AN)"} {
-		if strings.Contains(sddl, other) {
-			t.Errorf("the pipe admits %s: %s", other, sddl)
+	system, err := windows.CreateWellKnownSid(windows.WinLocalSystemSid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]*windows.SID{"the agent's user": user.User.Sid, "Administrators": admins, "SYSTEM": system}
+
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := map[string]bool{}
+	for i := range uint32(dacl.AceCount) {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil {
+			t.Fatal(err)
+		}
+		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+			t.Errorf("entry %d is not an allow entry: type %d", i, ace.Header.AceType)
+			continue
+		}
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart)) // #nosec G103 -- the SID follows the ACE header, as Windows lays it out
+		matched := ""
+		for name, w := range want {
+			if sid.Equals(w) {
+				matched = name
+			}
+		}
+		if matched == "" {
+			t.Errorf("the pipe admits %s, which it must not", sid)
+			continue
+		}
+		found[matched] = true
+	}
+	for name := range want {
+		if !found[name] {
+			t.Errorf("the pipe does not admit %s: %s", name, sd)
 		}
 	}
 }

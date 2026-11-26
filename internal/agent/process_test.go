@@ -196,7 +196,7 @@ func TestLeaseHandoverBetweenProcesses(t *testing.T) {
 	if c.holding() {
 		t.Fatalf("c took the lease while b held it: %s", c.output())
 	}
-	stopped := time.Now()
+	stopping := time.Now()
 	_ = b.stdin.Close()
 	select {
 	case err := <-b.exit:
@@ -206,9 +206,15 @@ func TestLeaseHandoverBetweenProcesses(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("b did not stop")
 	}
+	// b has exited, so its release is written: c must take over on its
+	// next check, not after the lease length. b's shutdown itself (durable
+	// writes of the release and the final heartbeat) is not part of this.
+	exited := time.Now()
 	waitFor(t, "c to take over from the stopped b", 10*time.Second, c.holding)
-	if took := time.Since(stopped); took >= fastTimings.Length {
-		t.Errorf("c took over %s after b stopped; a released lease is taken over at once", took)
+	took := time.Since(exited)
+	t.Logf("b shut down in %s; c took over %s after b exited", exited.Sub(stopping), took)
+	if took >= fastTimings.Length {
+		t.Errorf("c took over %s after b exited; a released lease is taken over at once", took)
 	}
 	if !c.saw("held 3") {
 		t.Errorf("c holds a generation other than 3: %s", c.output())
