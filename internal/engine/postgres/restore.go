@@ -222,11 +222,13 @@ func prepareConfig(dataDir string) error {
 }
 
 // Waiting for a restored instance: it accepts no connection until its
-// recovery is done, which takes as long as the WAL takes to replay; a
-// server that never listens has failed to start.
+// recovery is done, which takes as long as the WAL takes to replay, and
+// meanwhile answers that it is starting up. A server that has not answered
+// at all for unreachableTimeout, at the start or after answering, has
+// failed or stopped.
 const (
-	listenTimeout = 2 * time.Minute
-	pollInterval  = 500 * time.Millisecond
+	unreachableTimeout = 2 * time.Minute
+	pollInterval       = 500 * time.Millisecond
 )
 
 // sideConnect connects to the side instance as user, with a password or
@@ -239,8 +241,7 @@ func sideConnect(ctx context.Context, c instance.Conn, user string, password sec
 		return nil, err
 	}
 	cfg.Password = string(password.Expose())
-	listening := false
-	deadline := time.Now().Add(listenTimeout)
+	lastAnswer := time.Now()
 	for {
 		conn, err := pgconn.ConnectConfig(ctx, cfg)
 		if err == nil {
@@ -251,11 +252,12 @@ func sideConnect(ctx context.Context, c instance.Conn, user string, password sec
 		case ctx.Err() != nil:
 			return nil, ctx.Err()
 		case errors.As(err, &pgErr) && pgErr.Code == "57P03": // starting up or recovering
-			listening = true
+			lastAnswer = time.Now()
 		case errors.As(err, &pgErr):
 			return nil, secrets.ScrubError(err, password)
-		case !listening && time.Now().After(deadline):
-			return nil, fmt.Errorf("the side instance did not start listening within %s: %w", listenTimeout, secrets.ScrubError(err, password))
+		case time.Since(lastAnswer) > unreachableTimeout:
+			return nil, fmt.Errorf("the side instance has not answered for %s; it failed to start or stopped (see its server log): %w",
+				unreachableTimeout, secrets.ScrubError(err, password))
 		}
 		select {
 		case <-time.After(pollInterval):

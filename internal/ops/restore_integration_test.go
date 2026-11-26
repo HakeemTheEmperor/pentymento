@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -32,6 +33,10 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/secrets"
 	"github.com/HakeemTheEmperor/pentymento/internal/toolrun"
 )
+
+// restoreDeadline bounds one restore, so a stuck one fails with its own
+// error rather than at the test binary's timeout.
+const restoreDeadline = 10 * time.Minute
 
 // testProviders are the instance providers to restore through, from
 // PENTYM_TEST_PROVIDERS (CI sets docker,local); Docker by default.
@@ -173,7 +178,9 @@ func TestPostgresRestore(t *testing.T) {
 						set, work := sideInstances(t, p)
 						o := f.restore(t, eng, set, work)
 						o.Target = target
-						res, err := o.Run(ctx)
+						rctx, cancel := context.WithTimeout(ctx, restoreDeadline)
+						defer cancel()
+						res, err := o.Run(rctx)
 						if err != nil {
 							t.Fatal(err)
 						}
@@ -246,7 +253,9 @@ func TestMongoDBRestore(t *testing.T) {
 						set, work := sideInstances(t, p)
 						o := f.restore(t, eng, set, work)
 						o.Target = target
-						res, err := o.Run(ctx)
+						rctx, cancel := context.WithTimeout(ctx, restoreDeadline)
+						defer cancel()
+						res, err := o.Run(rctx)
 						if err != nil {
 							t.Fatal(err)
 						}

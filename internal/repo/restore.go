@@ -46,13 +46,18 @@ func (r *Repository) ReadPart(ctx context.Context, idx *Index, s *Snapshot, name
 const (
 	// readWorkers fetch and decode chunk groups at once.
 	readWorkers = 4
-	// readWindow bounds the groups fetched ahead of the writer; with
-	// maxGroupBytes it bounds the memory a read holds.
-	readWindow = 8
+	// readWindow bounds the groups fetched ahead of the writer: as many
+	// as there are workers, so every worker can be busy.
+	readWindow = readWorkers
 	// A group is a run of chunks stored next to each other in one pack,
 	// read with one ranged request: at most maxGroupBytes stored and
 	// maxGroupBytes decoded, and at most maxGroupChunks chunks.
-	maxGroupBytes  = 8 << 20
+	//
+	// A read holds at most readWindow+2 decoded groups (waiting, being
+	// written, and one the planner is placing) plus, per worker, one
+	// stored and one decoded group: about 56 MiB, whatever the stream's
+	// size.
+	maxGroupBytes  = 4 << 20
 	maxGroupChunks = 64
 )
 
@@ -228,14 +233,15 @@ func (c *chunkReader) fetch(ctx context.Context, g *fetchGroup) {
 		g.err = fmt.Errorf("chunk %s in pack %s: %w", g.refs[0].id, first.Pack, err)
 		return
 	}
-	buf, err := io.ReadAll(io.LimitReader(rc, length+1))
+	buf := make([]byte, length)
+	_, err = io.ReadFull(rc, buf)
 	_ = rc.Close()
-	if err != nil {
-		g.err = err
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		g.err = fmt.Errorf("pack %s is shorter than the index says: %w", first.Pack, ErrCorrupt)
 		return
 	}
-	if int64(len(buf)) != length {
-		g.err = fmt.Errorf("pack %s is shorter than the index says: %w", first.Pack, ErrCorrupt)
+	if err != nil {
+		g.err = err
 		return
 	}
 	g.data = make([][]byte, 0, len(g.refs))
