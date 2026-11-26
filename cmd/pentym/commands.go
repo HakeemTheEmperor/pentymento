@@ -71,7 +71,7 @@ func (a *app) rootCommand() *cobra.Command {
 		historyCommand(),
 		a.keyCommand(),
 		a.repoCommand(),
-		doctorCommand(),
+		a.doctorCommand(),
 		notifyCommand(),
 		debugCommand(),
 	)
@@ -219,12 +219,6 @@ func historyCommand() *cobra.Command {
 		"Show the last 30 days of operations on prod-mg", "pentym history prod-mg --since 30d")
 	c.Flags().String("since", "", "show operations from this long ago, such as 30d")
 	return c
-}
-
-func doctorCommand() *cobra.Command {
-	return stub("doctor [target]", "Check tools, versions, capabilities, privileges and bucket settings", optionalArg("[target]"),
-		"Check everything", "pentym doctor",
-		"Check prod-pg", "pentym doctor prod-pg")
 }
 
 func notifyCommand() *cobra.Command {

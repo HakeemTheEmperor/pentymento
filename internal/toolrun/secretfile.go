@@ -184,3 +184,7 @@ func MongoConfig(password secrets.Secret) secrets.Secret {
 	clear(b)
 	return s
 }
+
+// PIDAlive reports whether a process with this ID exists, for telling
+// leftovers of crashed runs from files and servers still in use.
+func PIDAlive(pid int) bool { return pidAlive(pid) }

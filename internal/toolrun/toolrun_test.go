@@ -331,3 +331,55 @@ func TestToolVersion(t *testing.T) {
 		t.Errorf("ToolVersion = %v, %v", v, err)
 	}
 }
+
+// TestStartStop: a background tool runs until stopped; Stop ends it and
+// what it started, deletes its secret files, and is not an error.
+func TestStartStop(t *testing.T) {
+	r, _ := newRunner(t)
+	pidFile := filepath.Join(t.TempDir(), "pids")
+	f, err := WriteSecretFile(r.SecretDir, ".pw", secrets.New([]byte("x")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := helper("tree", pidFile, "wait", "ignore-term")
+	c.Files = []*SecretFile{f}
+	p, err := r.Start(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, grandchild := readPIDs(t, pidFile)
+	if p.Pid() != child {
+		t.Errorf("Pid = %d, want %d", p.Pid(), child)
+	}
+	select {
+	case <-p.Done():
+		t.Fatal("the tool exited by itself")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if err := p.Stop(500 * time.Millisecond); err != nil {
+		t.Errorf("Stop = %v", err)
+	}
+	waitDead(t, child, grandchild)
+	if _, err := os.Stat(f.Path); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("secret file left: %v", err)
+	}
+	if err := p.Stop(time.Second); err != nil {
+		t.Errorf("second Stop = %v", err)
+	}
+}
+
+// TestStartExit: a background tool that fails reports it through Wait.
+func TestStartExit(t *testing.T) {
+	r, _ := newRunner(t)
+	p, err := r.Start(helper("exit", "4", "bad option"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ee *ExitError
+	if err := p.Wait(); !errors.As(err, &ee) || ee.Code != 4 {
+		t.Errorf("Wait = %v", err)
+	}
+	if _, err := r.Start(&Cmd{Tool: "pg_dump", Path: "x", Extra: []string{"-Z9"}}); !errors.Is(err, ErrSourceCompression) {
+		t.Errorf("Start with a compression flag = %v", err)
+	}
+}

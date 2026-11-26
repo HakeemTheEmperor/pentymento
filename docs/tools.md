@@ -12,7 +12,7 @@ A password on a command line is visible to every user of the machine (`ps`, `/pr
 
 pentym checks every command before running it and refuses one whose arguments, or environment outside that fallback, contain a secret.
 
-The temporary files are created in their own directory, readable only by pentym's user (mode `0600` in a `0700` directory; on Windows, an access list granting only that user, without inherited entries). Each file is named after the process that wrote it and deleted as soon as the tool exits, whether it succeeded, failed or was cancelled. Files left by a pentym that crashed are deleted the next time pentym runs.
+The temporary files are created in their own directory, readable only by pentym's user (mode `0600` in a `0700` directory; on Windows, an access list granting only that user, without inherited entries). Each file is named after the process that wrote it and deleted as soon as the tool exits, whether it succeeded, failed or was cancelled. Files left by a pentym that crashed are deleted the next time pentym starts a side instance. They live in `secrets/` under `work_dir` (see [Configuration](reference/config.md#side-instances)).
 
 ## Streams, logs and exit codes
 

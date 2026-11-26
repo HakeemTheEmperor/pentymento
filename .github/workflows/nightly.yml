@@ -34,11 +34,25 @@ jobs:
     env:
       PENTYM_TEST_POSTGRES: ${{ matrix.postgres }}
       PENTYM_TEST_MONGODB: ${{ matrix.mongodb }}
+      PENTYM_TEST_PROVIDERS: docker,local
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # Both instance providers must work (Build Order C12): install the
+      # Postgres server binaries, and take mongod from the official image.
+      - name: install local server binaries
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y "postgresql-${PENTYM_TEST_POSTGRES}"
+          mkdir -p "$HOME/mongodb/bin"
+          id=$(docker create "mongo:${PENTYM_TEST_MONGODB}")
+          docker cp "$id:/usr/bin/mongod" "$HOME/mongodb/bin/mongod"
+          docker rm "$id"
+          "$HOME/mongodb/bin/mongod" --version
+          echo "PENTYM_TEST_POSTGRES_BIN=/usr/lib/postgresql/${PENTYM_TEST_POSTGRES}/bin" >> "$GITHUB_ENV"
+          echo "PENTYM_TEST_MONGODB_BIN=$HOME/mongodb/bin" >> "$GITHUB_ENV"
       - run: make test-integration
 
   large-snapshot:

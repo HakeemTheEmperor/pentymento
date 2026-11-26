@@ -125,6 +125,7 @@ func stubArgs(c *cobra.Command) []string {
 // stub.
 var implemented = map[string]bool{
 	"pentym check":              true,
+	"pentym doctor":             true,
 	"pentym key rotate":         true,
 	"pentym repo upgrade":       true,
 	"pentym repo rebuild-index": true,
