@@ -161,6 +161,9 @@ type LogHealth struct {
 	RetainedBytes, RetainedLimit int64
 	// Lost reports a slot the server has invalidated.
 	Lost bool
+	// Oplog reports a MongoDB oplog: Window applies, and the retained
+	// fields do not.
+	Oplog bool
 	// Window is how far back the oplog reaches (MongoDB).
 	Window time.Duration
 }

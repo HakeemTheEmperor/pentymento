@@ -76,7 +76,7 @@ Every object below is compact JSON, encrypted with the metadata key and bound to
 | Object | Fields |
 | --- | --- |
 | `targets/<id>/info` | `name`, `engine` |
-| Checkpoint | `target`, `generation` (the capture lease's), `seq`, `position` (engine-specific: for Postgres `<timeline>/<LSN>`, such as `1/0/3000060`; for MongoDB the oplog timestamp), `time` |
+| Checkpoint | `target`, `generation` (the capture lease's), `seq`, `position` (engine-specific: for Postgres `<timeline>/<LSN>`, such as `1/0/3000060`; for MongoDB the oplog timestamp `<seconds>:<increment>`, such as `1700000000:3`), `time` |
 | Gap | `target`, `from` (the last position stored before it, if known), `to` (where capture could resume, if known), `reason`, `time`, `generation` (the capture lease of the agent that found it). A stretch of log that was never stored, because the replication slot was dropped or invalidated, the server removed WAL, or the oplog rolled over: point-in-time recovery cannot reach a time inside it |
 | Event | `target`, `type`, `object`, `xid`, `lsn`, `oplog_ts`, `position`, `time` |
 | Heartbeat | `host`, `agent_id`, `state` (`running` or `stopped`), `time` |
@@ -227,7 +227,7 @@ Captured WAL and oplog are stored as individual objects, so recovery reads them 
 
 - `<timeline>` is the Postgres timeline as 8 uppercase hexadecimal digits, and `<segment>` the 24-character Postgres segment file name, such as `000000010000000000000003`.
 - A partial segment holds WAL up to `<end-lsn>`, 16 uppercase hexadecimal digits, so successive partials of one segment are distinct objects; prune removes those a later partial or the complete segment supersedes.
-- An oplog batch is named by its first and last entries' timestamps, each written `<seconds>.<increment>` with 10 zero-padded digits per part, so keys sort by time.
+- An oplog batch is named by its first and last entries' timestamps, each written `<seconds>.<increment>` with 10 zero-padded digits per part, so keys sort by time. It holds the entries exactly as in `local.oplog.rs`, BSON documents one after another with nothing between them (the format of `mongodump`'s `oplog.bson`), only entries the replica set's majority has written. A MongoDB checkpoint's `position` is the last stored entry's timestamp, written `<seconds>:<increment>`, such as `1700000000:3`.
 - Storing a segment that already exists succeeds: a resent segment after a crash is a harmless duplicate.
 
 ## Local metadata cache

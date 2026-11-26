@@ -218,7 +218,25 @@ While the agent holds a Postgres target's lease, it streams the target's WAL fro
 | Retained WAL, `max_slot_wal_keep_size` set | 50% of it | 80% of it |
 | Retained WAL, no limit set | 10 GB | 50 GB, with the advice to set `max_slot_wal_keep_size` |
 
-A slot keeps WAL until the agent stores it, so a stopped agent makes the server keep WAL until it returns. Set `max_slot_wal_keep_size` so a long outage cannot fill the server's disk; the slot is then invalidated instead, which the agent reports as a gap. Alert delivery (webhooks, Slack) and configurable thresholds come with notifications; MongoDB capture comes with oplog tailing.
+A slot keeps WAL until the agent stores it, so a stopped agent makes the server keep WAL until it returns. Set `max_slot_wal_keep_size` so a long outage cannot fill the server's disk; the slot is then invalidated instead, which the agent reports as a gap. Alert delivery (webhooks, Slack) and configurable thresholds come with notifications.
+
+### Oplog capture (MongoDB)
+
+While the agent holds a MongoDB target's lease, it tails the replica set's oplog, `local.oplog.rs`, with a tailable cursor (not a change stream, whose output `mongorestore --oplogReplay` cannot replay), connecting as `credentials.replication` or, without it, `credentials.backup`. The user needs `read` on the `local` database, which the backup user already has. A standalone server has no oplog: the agent holds its lease without capturing and says so, and its snapshots allow no point-in-time recovery.
+
+- Entries are stored in batches, each its own object holding the entries as they are in the oplog, BSON documents one after another (the format of `mongodump`'s `oplog.bson`). A batch is stored after 10 seconds, 16 MiB or 10,000 entries, whichever comes first, and once more when the agent stops, so the recovery point is seconds.
+- Only entries a majority of the replica set has written are stored, so a failover never rolls back a stored entry. While the set has no majority, capture waits, and its lag grows.
+- After each stored batch the agent writes a checkpoint at the batch's last entry, carrying its lease generation. A restarted agent resumes after the checkpoint; a batch stored twice is harmless.
+- **Rollover.** The oplog is a fixed size: when the agent has been stopped, or falls behind, for longer than the oplog reaches back, entries it has not stored are overwritten. If the oplog's oldest entry is newer than the checkpoint, or it rolls past capture while capture reads it, the agent records a gap, logs an error, counts it in `pentym_job_failures_total{job="capture"}`, and takes a base backup, as for Postgres.
+- When capture starts with no checkpoint at all, it starts from the newest entry and the agent takes a base backup, once.
+- **Monitoring.** Every 30 seconds the agent checks how far back the oplog reaches (its window) and how far capture lags, and publishes `pentym_mongo_oplog_window_seconds` and `pentym_capture_lag_seconds`, with the same logging as for Postgres:
+
+| Condition | Warning | Critical |
+| --- | --- | --- |
+| Capture lag | 5 min | 15 min |
+| Oplog window | under 24 h | under 6 h, or capture lag over half the window |
+
+The window is how long an agent can be stopped before capture loses entries. Enlarge the oplog with `replSetResizeOplog` if it holds less than a day.
 
 ## `pentym agent reload`
 

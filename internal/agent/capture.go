@@ -32,6 +32,10 @@ const (
 	RetainedCriticalShare = 0.8
 	RetainedWarning       = 10 << 30
 	RetainedCritical      = 50 << 30
+	// Oplog window thresholds; the window is also critical when capture
+	// lags more than half of it.
+	WindowWarning  = 24 * time.Hour
+	WindowCritical = 6 * time.Hour
 )
 
 // Alert levels.
@@ -109,7 +113,7 @@ func (a *Agent) captureFor(ctx context.Context, t Target) error {
 // notCapturing holds the lease without capturing, for an engine that
 // does not capture yet, and says so once.
 func (a *Agent) notCapturing(ctx context.Context, log *slog.Logger, err error) error {
-	log.Info("this engine does not capture its log in this build; holding the lease only", "reason", err.Error())
+	log.Info("not capturing the log; holding the lease only", "reason", err.Error())
 	<-ctx.Done()
 	return nil
 }
@@ -202,11 +206,25 @@ func (s *segmentSink) Segment(ctx context.Context, seg engine.Segment) error {
 			return r.PutWALPartial(ctx, s.t.ID, timeline, seg.Name, end, seg.Data)
 		case "history":
 			return r.PutTimelineHistory(ctx, s.t.ID, timeline, seg.Data)
+		case "oplog":
+			first, err := parseOplogTS(string(seg.First))
+			if err != nil {
+				return err
+			}
+			last, err := parseOplogTS(string(seg.Last))
+			if err != nil {
+				return err
+			}
+			return r.PutOplogBatch(ctx, s.t.ID, first, last, seg.Data)
 		}
 		return fmt.Errorf("segment kind %q is not stored by this build", seg.Kind)
 	}
 	if err := s.a.uploads.Do(ctx, put); err != nil {
-		return fmt.Errorf("store %s: %w", seg.Name, err)
+		name := seg.Name
+		if name == "" {
+			name = "the " + seg.Kind + " batch " + string(seg.First) + " to " + string(seg.Last)
+		}
+		return fmt.Errorf("store %s: %w", name, err)
 	}
 	s.stored.Add(int64(len(seg.Data)))
 	if seg.Checkpoint == "" {
@@ -248,13 +266,25 @@ func parseLSN(s string) (repo.LSN, error) {
 	return repo.LSN(h<<32 | l), nil
 }
 
+// parseOplogTS reads a MongoDB oplog position written as
+// <seconds>:<increment>.
+func parseOplogTS(s string) (repo.OplogTS, error) {
+	t, i, ok := strings.Cut(s, ":")
+	ts, err1 := strconv.ParseUint(t, 10, 32)
+	inc, err2 := strconv.ParseUint(i, 10, 32)
+	if !ok || err1 != nil || err2 != nil {
+		return repo.OplogTS{}, fmt.Errorf("oplog position %q is not understood", s)
+	}
+	return repo.OplogTS{T: uint32(ts), I: uint32(inc)}, nil // #nosec G115 -- parsed as 32-bit numbers
+}
+
 // monitor checks what the server retains and how far capture lags, every
 // HealthInterval, against the thresholds, logging when a condition starts,
 // changes level or clears (alert delivery comes with notifications).
 func (a *Agent) monitor(ctx context.Context, eng engine.Engine, et engine.Target, s *segmentSink, log *slog.Logger) {
 	m := a.o.Telemetry.Metrics
 	started := time.Now()
-	var lagLevel, retainedLevel int
+	var lagLevel, retainedLevel, windowLevel int
 	tick := time.NewTicker(a.o.HealthInterval)
 	defer tick.Stop()
 	for {
@@ -281,8 +311,15 @@ func (a *Agent) monitor(ctx context.Context, eng engine.Engine, et engine.Target
 			lag = time.Since(at)
 		}
 		m.CaptureLag.WithLabelValues(et.Name).Set(lag.Seconds())
-		m.PGSlotRetainedWAL.WithLabelValues(et.Name).Set(float64(h.RetainedBytes))
 		lagLevel = report(log, lagLevel, lagAlert(lag), "capture lag", "lag", lag.Round(time.Second).String())
+		if h.Oplog {
+			m.MongoOplogWindow.WithLabelValues(et.Name).Set(h.Window.Seconds())
+			lvl, advice := windowAlert(h.Window, lag)
+			windowLevel = report(log, windowLevel, lvl, "the oplog window",
+				"window", h.Window.Round(time.Second).String(), "lag", lag.Round(time.Second).String(), "advice", advice)
+			continue
+		}
+		m.PGSlotRetainedWAL.WithLabelValues(et.Name).Set(float64(h.RetainedBytes))
 		lvl, advice := retainedAlert(h)
 		retainedLevel = report(log, retainedLevel, lvl, "WAL retained by the replication slot",
 			"retained_bytes", h.RetainedBytes, "limit_bytes", h.RetainedLimit, "advice", advice)
@@ -336,6 +373,20 @@ func retainedAlert(h *engine.LogHealth) (int, string) {
 		return levelCritical, "set max_slot_wal_keep_size so a stopped agent cannot fill the server's disk"
 	case h.RetainedBytes >= RetainedWarning:
 		return levelWarning, "set max_slot_wal_keep_size so a stopped agent cannot fill the server's disk"
+	}
+	return levelOK, ""
+}
+
+// windowAlert classifies the oplog window (PRD 9.1): how far back the
+// oplog reaches bounds how long capture can stop before entries are lost.
+func windowAlert(window, lag time.Duration) (int, string) {
+	switch {
+	case window < WindowCritical:
+		return levelCritical, "enlarge the oplog (replSetResizeOplog) so a stopped agent can catch up before entries are overwritten"
+	case lag > window/2:
+		return levelCritical, "capture lags more than half the oplog window; check that the agent keeps up before the oplog rolls over"
+	case window < WindowWarning:
+		return levelWarning, "enlarge the oplog (replSetResizeOplog) so it holds at least a day"
 	}
 	return levelOK, ""
 }

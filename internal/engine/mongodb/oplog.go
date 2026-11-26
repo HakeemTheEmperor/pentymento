@@ -208,7 +208,7 @@ func (e *Engine) LogHealth(ctx context.Context, t engine.Target) (*engine.LogHea
 	if err != nil {
 		return nil, err
 	}
-	return &engine.LogHealth{Head: Position(head), Window: time.Duration(int64(newest.T)-int64(oldest.T)) * time.Second}, nil
+	return &engine.LogHealth{Oplog: true, Head: Position(head), Window: time.Duration(int64(newest.T)-int64(oldest.T)) * time.Second}, nil
 }
 
 // batch is oplog entries waiting to be stored.

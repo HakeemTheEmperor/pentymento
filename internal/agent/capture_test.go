@@ -285,3 +285,125 @@ func TestMonitor(t *testing.T) {
 			testutil.ToFloat64(m.CaptureLag.WithLabelValues("prod-pg")) > 0
 	})
 }
+
+// oplogEngine is a fake MongoDB engine whose capture stores numbered
+// oplog batches of two entries, one per walEngine.segEvery.
+type oplogEngine struct{ walEngine }
+
+func (e *oplogEngine) Name() string { return "mongodb" }
+
+func (e *oplogEngine) Capture(ctx context.Context, _ engine.Target, from engine.Position, sink engine.LogSink) error {
+	e.mu.Lock()
+	e.froms = append(e.froms, from)
+	e.mu.Unlock()
+	n := 0
+	if from != "" {
+		_, _ = fmt.Sscanf(string(from), "1700000000:%d", &n)
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(e.segEvery):
+		}
+		first, last := fmt.Sprintf("1700000000:%d", n+1), fmt.Sprintf("1700000000:%d", n+2)
+		n += 2
+		if err := sink.Segment(ctx, engine.Segment{
+			Kind: "oplog", First: engine.Position(first), Last: engine.Position(last),
+			Checkpoint: engine.Position(last), Data: []byte("oplog " + first + "-" + last),
+		}); err != nil {
+			return err
+		}
+	}
+}
+
+func oplogOptions(t *testing.T, dir string, e *oplogEngine) Options {
+	t.Helper()
+	o := captureOptions(t, dir, &e.walEngine, &backups{})
+	o.Engine = func(Target) (engine.Engine, error) { return e, nil }
+	return o
+}
+
+// TestCaptureOplog: oplog batches are stored under their first and last
+// timestamps, each followed by a checkpoint at the last, and a restarted
+// agent resumes from it.
+func TestCaptureOplog(t *testing.T) {
+	dir := newRepoDir(t)
+	e := &oplogEngine{walEngine{segEvery: 30 * time.Millisecond}}
+	r := start(t, oplogOptions(t, dir, e))
+	waitFor(t, "batches", 5*time.Second, func() bool { cp := checkpoint(t, dir); return cp != nil && cp.Seq >= 3 })
+	r.stop(t)
+	cp := checkpoint(t, dir)
+	full := openAs(t, dir, nil, "admin")
+	tid, _ := full.TargetID("prod-pg")
+	batches, err := full.OplogBatches(context.Background(), tid)
+	if err != nil || uint64(len(batches)) < cp.Seq {
+		t.Fatalf("stored batches = %v, %v", batches, err)
+	}
+	if b := batches[0]; b.First != (repo.OplogTS{T: 1700000000, I: 1}) || b.Last != (repo.OplogTS{T: 1700000000, I: 2}) {
+		t.Errorf("first batch = %+v", b)
+	}
+	data, err := full.GetSegment(context.Background(), batches[0].Key)
+	if err != nil || string(data) != "oplog 1700000000:1-1700000000:2" {
+		t.Errorf("batch content = %q, %v", data, err)
+	}
+	last := batches[len(batches)-1].Last
+	if cp.Position != fmt.Sprintf("%d:%d", last.T, last.I) {
+		t.Errorf("checkpoint %s, last stored batch ends at %+v", cp.Position, last)
+	}
+
+	e2 := &oplogEngine{walEngine{segEvery: 30 * time.Millisecond}}
+	start(t, oplogOptions(t, dir, e2))
+	waitFor(t, "the resumed capture", 5*time.Second, func() bool { return len(e2.fromsSeen()) == 1 })
+	if got := e2.fromsSeen()[0]; got != engine.Position(cp.Position) {
+		t.Errorf("resumed from %q, the checkpoint is %q", got, cp.Position)
+	}
+}
+
+func TestParseOplogTS(t *testing.T) {
+	if ts, err := parseOplogTS("1700000000:42"); err != nil || ts != (repo.OplogTS{T: 1700000000, I: 42}) {
+		t.Errorf("parseOplogTS = %+v, %v", ts, err)
+	}
+	for _, s := range []string{"", "1700000000", "1/0/3000060", "4294967296:1", "1:x"} {
+		if _, err := parseOplogTS(s); err == nil {
+			t.Errorf("parseOplogTS(%q) succeeded", s)
+		}
+	}
+}
+
+func TestWindowAlert(t *testing.T) {
+	for _, tt := range []struct {
+		window, lag time.Duration
+		want        int
+		advice      string
+	}{
+		{48 * time.Hour, 0, levelOK, ""},
+		{24 * time.Hour, time.Hour, levelOK, ""},
+		{23 * time.Hour, 0, levelWarning, "at least a day"},
+		{6 * time.Hour, 0, levelWarning, "at least a day"},
+		{6*time.Hour - time.Second, 0, levelCritical, "enlarge the oplog"},
+		{48 * time.Hour, 24*time.Hour + time.Second, levelCritical, "half the oplog window"},
+		{48 * time.Hour, 24 * time.Hour, levelOK, ""},
+	} {
+		got, advice := windowAlert(tt.window, tt.lag)
+		if got != tt.want || !strings.Contains(advice, tt.advice) {
+			t.Errorf("windowAlert(%s, %s) = %d %q", tt.window, tt.lag, got, advice)
+		}
+	}
+}
+
+// TestMonitorOplog: capture of an oplog publishes the window, not the
+// slot's retained WAL.
+func TestMonitorOplog(t *testing.T) {
+	dir := newRepoDir(t)
+	e := &oplogEngine{walEngine{segEvery: time.Hour, health: engine.LogHealth{Oplog: true, Head: "1700000000:9", Window: 3 * time.Hour}}}
+	o := oplogOptions(t, dir, e)
+	start(t, o)
+	m := o.Telemetry.Metrics
+	waitFor(t, "the metrics", 5*time.Second, func() bool {
+		return testutil.ToFloat64(m.MongoOplogWindow.WithLabelValues("prod-pg")) == (3 * time.Hour).Seconds()
+	})
+	if n := testutil.CollectAndCount(m.PGSlotRetainedWAL); n != 0 {
+		t.Errorf("an oplog capture published %d retained-WAL series", n)
+	}
+}
