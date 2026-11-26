@@ -49,7 +49,7 @@ func pgSQL(t *testing.T, dsn, sql string) [][]byte {
 
 // pgServer starts a server that allows replication connections, with a
 // minimal backup role and an app database holding about 100 MB.
-func pgServer(t *testing.T, version string) (engine.Target, *postgres.Engine, string) {
+func pgServer(t *testing.T, version string) (engine.Target, *postgres.Engine, string, *dbtest.Postgres) {
 	t.Helper()
 	pg := dbtest.StartPostgres(t, version)
 	hba := string(pgSQL(t, pg.ConnString, "SELECT current_setting('hba_file')")[0])
@@ -79,7 +79,7 @@ func pgServer(t *testing.T, version string) (engine.Target, *postgres.Engine, st
 		}},
 		Runner: &toolrun.Runner{SecretDir: filepath.Join(t.TempDir(), "secrets")},
 	}
-	return target, eng, pg.ConnString
+	return target, eng, pg.ConnString, pg
 }
 
 // reassemble reads every part of a snapshot back and checks it (verify
@@ -141,7 +141,7 @@ func TestPostgresBackups(t *testing.T) {
 	for _, version := range dbtest.PostgresVersions() {
 		t.Run(version, func(t *testing.T) {
 			ctx := context.Background()
-			target, eng, dsn := pgServer(t, version)
+			target, eng, dsn, _ := pgServer(t, version)
 			f := newFixture(t)
 			b := f.backup(eng)
 			b.Target = target

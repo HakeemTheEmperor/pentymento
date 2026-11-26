@@ -136,7 +136,7 @@ func (s *blockStream) Read(p []byte) (int, error) {
 
 type fixture struct {
 	dir  string
-	be   *local.Backend
+	be   backend.Backend
 	repo *repo.Repository
 	full *crypto.Slot
 	tel  *telemetry.Telemetry
@@ -149,6 +149,14 @@ func newFixture(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	f := newFixtureOn(t, be)
+	f.dir = dir
+	return f
+}
+
+// newFixtureOn creates a repository on be, unlocked with the agent slot.
+func newFixtureOn(t *testing.T, be backend.Backend) *fixture {
+	t.Helper()
 	m, err := crypto.Generate()
 	if err != nil {
 		t.Fatal(err)
@@ -172,7 +180,7 @@ func newFixture(t *testing.T) *fixture {
 	if _, _, err := r.UnlockWith(context.Background(), secrets.New([]byte("agent")), repo.UnlockOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	return &fixture{dir: dir, be: be, repo: r, full: full, tel: telemetry.New(nil, nil)}
+	return &fixture{be: be, repo: r, full: full, tel: telemetry.New(nil, nil)}
 }
 
 // admin opens the repository with the full slot.

@@ -49,3 +49,19 @@ mongodump --uri=<uri> --username=<user> --config=<temporary file> --archive [--o
 - `--archive` with no file name writes one archive to standard output, which streams into the repository as the snapshot's one stream, `mongodump.archive`.
 - `--oplog` is added on a replica set, so the archive restores to one consistent point. pentym reads the archive as it passes and records the first and last oplog timestamps it holds as the snapshot's start and end (`<seconds>:<ordinal>`). A standalone server has no oplog: its snapshot is taken without `--oplog`, records no positions, and allows no point-in-time recovery ([PTM-2011](errors/PTM-2011.md)).
 - A stream that is not a complete archive (wrong magic number, a document or block cut short, a collection left open) fails the backup, even if `mongodump` exited cleanly.
+
+## Restoring a snapshot into a side instance
+
+Restores and verification bring a snapshot up in a side instance: a temporary server of the snapshot's version, started by an instance provider (local binaries or Docker) over a new directory under `work_dir`, listening on `127.0.0.1` only. pentym reads the snapshot with parallel range reads while it restores, holds the repository's shared lock until the data is in place, and removes the instance and its directory afterwards, or at once if the restore fails.
+
+**Postgres.** `base.tar` is unpacked into the data directory and each tablespace archive into `pg_tblspc/<oid>` as an in-place tablespace, so nothing points outside the directory. The WAL in the snapshot brings the cluster to a consistent state when it starts. The cluster's own `postgresql.conf`, `postgresql.auto.conf`, `pg_hba.conf` and `pg_ident.conf` are kept beside pentym's, renamed with `.pentym-original`; the side instance runs without archiving, preloaded libraries or TLS.
+
+The restored cluster's roles have passwords pentym does not know, so pentym gives itself a login:
+
+1. It starts the instance with access rules that trust every login. The instance listens only on `127.0.0.1` (under Docker, its port is published only there).
+2. As soon as the cluster has recovered, pentym logs in, creates the role `pentym_side` as a superuser with a random password, and replaces the access rules with one that admits only `pentym_side`, with its password.
+3. It reloads the rules and checks that a login without a password is refused before it uses the instance.
+
+The window lasts a few seconds. It never touches production: it applies only to the side instance, which is deleted after the restore.
+
+**MongoDB.** pentym starts an empty side instance with a random superuser password, then streams the archive into `mongorestore --archive --stopOnError`, adding `--oplogReplay` for a replica-set snapshot so the data is as of the snapshot's consistent point. The password reaches `mongorestore` in a temporary `--config` file. `mongorestore` comes from the same MongoDB Database Tools as `mongodump`.

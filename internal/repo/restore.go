@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/backend"
 	"github.com/HakeemTheEmperor/pentymento/internal/chunker"
@@ -40,15 +41,143 @@ func (r *Repository) ReadPart(ctx context.Context, idx *Index, s *Snapshot, name
 	return fmt.Errorf("snapshot %s has no part %q", s.ID, name)
 }
 
+// Read-path tuning (PRD 7.1: restores fetch chunks with parallel range
+// reads and read-ahead).
+const (
+	// readWorkers fetch and decode chunk groups at once.
+	readWorkers = 4
+	// readWindow bounds the groups fetched ahead of the writer: as many
+	// as there are workers, so every worker can be busy.
+	readWindow = readWorkers
+	// A group is a run of chunks stored next to each other in one pack,
+	// read with one ranged request: at most maxGroupBytes stored and
+	// maxGroupBytes decoded, and at most maxGroupChunks chunks.
+	//
+	// A read holds at most readWindow+2 decoded groups (waiting, being
+	// written, and one the planner is placing) plus, per worker, one
+	// stored and one decoded group: about 56 MiB, whatever the stream's
+	// size.
+	maxGroupBytes  = 4 << 20
+	maxGroupChunks = 64
+)
+
+// chunkRef is one chunk of a stream, located.
+type chunkRef struct {
+	id      chunker.ID
+	loc     Location
+	wrapped []byte
+}
+
+// fetchGroup is a run of adjacent chunks, fetched together, or an error
+// that ends the stream.
+type fetchGroup struct {
+	refs []chunkRef
+	done chan struct{}
+	data [][]byte
+	err  error
+}
+
+// readStream writes a stream to w. Chunks stored next to each other in a
+// pack are fetched with one ranged read; up to readWorkers groups are
+// fetched and decoded at once and up to readWindow wait ahead of the
+// writer, delivered in order, so memory stays bounded whatever the
+// stream's size. Every chunk is checked against its ID.
 func (r *Repository) readStream(ctx context.Context, idx *Index, s *Snapshot, list []string, w io.Writer) error {
 	if !r.CanRead() {
 		return ErrNoPrivateKey
 	}
-	cr, err := r.newChunkReader(idx)
-	if err != nil {
-		return err
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	readers := make([]*chunkReader, 0, readWorkers+1)
+	defer func() {
+		for _, cr := range readers {
+			cr.close()
+		}
+	}()
+	for range readWorkers + 1 {
+		cr, err := r.newChunkReader(idx)
+		if err != nil {
+			return err
+		}
+		readers = append(readers, cr)
 	}
-	defer cr.close()
+	order := make(chan *fetchGroup, readWindow)
+	jobs := make(chan *fetchGroup)
+	var wg sync.WaitGroup
+	for _, cr := range readers[1:] {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for g := range jobs {
+				cr.fetch(ctx, g)
+				close(g.done)
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(jobs)
+		defer close(order)
+		if err := r.planStream(ctx, readers[0], idx, s, list, order, jobs); err != nil {
+			g := &fetchGroup{err: err, done: make(chan struct{})}
+			close(g.done)
+			select {
+			case order <- g:
+			case <-ctx.Done():
+			}
+		}
+	}()
+	err := writeGroups(ctx, order, w)
+	cancel()
+	for range order { //nolint:revive // drained only to let the planner exit
+	}
+	wg.Wait()
+	return err
+}
+
+// writeGroups writes the groups' chunks to w in order.
+func writeGroups(ctx context.Context, order <-chan *fetchGroup, w io.Writer) error {
+	for g := range order {
+		select {
+		case <-g.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if g.err != nil {
+			return g.err
+		}
+		for _, d := range g.data {
+			if _, err := w.Write(d); err != nil {
+				return err
+			}
+		}
+	}
+	return ctx.Err()
+}
+
+// planStream reads the stream's chunk lists and sends runs of adjacent
+// chunks, first in order (bounding the read-ahead), then to a worker.
+func (r *Repository) planStream(ctx context.Context, cr *chunkReader, idx *Index, s *Snapshot, list []string,
+	order chan<- *fetchGroup, jobs chan<- *fetchGroup,
+) error {
+	var cur *fetchGroup
+	var stored, raw int
+	send := func() error {
+		if cur == nil {
+			return nil
+		}
+		g := cur
+		cur = nil
+		for _, ch := range []chan<- *fetchGroup{order, jobs} {
+			select {
+			case ch <- g:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		return nil
+	}
 	for _, lid := range list {
 		id, err := chunker.ParseID(lid)
 		if err != nil {
@@ -64,16 +193,67 @@ func (r *Repository) readStream(ctx context.Context, idx *Index, s *Snapshot, li
 		for off := 0; off < len(block); off += 32 {
 			var cid chunker.ID
 			copy(cid[:], block[off:])
-			data, err := cr.read(ctx, cid)
-			if err != nil {
-				return fmt.Errorf("snapshot %s: %w", s.ID, err)
+			loc, wrapped, ok := idx.Lookup(cid)
+			if !ok {
+				return fmt.Errorf("snapshot %s: chunk %s is not in the index: %w", s.ID, cid, ErrCorrupt)
 			}
-			if _, err := w.Write(data); err != nil {
-				return err
+			if cur != nil {
+				last := cur.refs[len(cur.refs)-1].loc
+				adjacent := last.Pack == loc.Pack && last.Offset+last.Length == loc.Offset
+				fits := stored+int(loc.Length) <= maxGroupBytes && raw+int(loc.RawLen) <= maxGroupBytes && len(cur.refs) < maxGroupChunks
+				if !adjacent || !fits {
+					if err := send(); err != nil {
+						return err
+					}
+				}
 			}
+			if cur == nil {
+				cur = &fetchGroup{done: make(chan struct{})}
+				stored, raw = 0, 0
+			}
+			cur.refs = append(cur.refs, chunkRef{id: cid, loc: loc, wrapped: wrapped})
+			stored += int(loc.Length)
+			raw += int(loc.RawLen)
 		}
 	}
-	return nil
+	return send()
+}
+
+// fetch reads a group of adjacent chunks with one ranged read and decodes
+// each, setting g.data or g.err.
+func (c *chunkReader) fetch(ctx context.Context, g *fetchGroup) {
+	first, last := g.refs[0].loc, g.refs[len(g.refs)-1].loc
+	length := int64(last.Offset+last.Length) - int64(first.Offset)
+	rc, err := c.r.be.Get(ctx, packKey(first.Pack), &backend.Range{Offset: int64(first.Offset), Length: length})
+	if errors.Is(err, backend.ErrInvalidRange) {
+		g.err = fmt.Errorf("pack %s is shorter than the index says: %w: %w", first.Pack, ErrCorrupt, err)
+		return
+	}
+	if err != nil {
+		g.err = fmt.Errorf("chunk %s in pack %s: %w", g.refs[0].id, first.Pack, err)
+		return
+	}
+	buf := make([]byte, length)
+	_, err = io.ReadFull(rc, buf)
+	_ = rc.Close()
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
+		g.err = fmt.Errorf("pack %s is shorter than the index says: %w", first.Pack, ErrCorrupt)
+		return
+	}
+	if err != nil {
+		g.err = err
+		return
+	}
+	g.data = make([][]byte, 0, len(g.refs))
+	for _, ref := range g.refs {
+		at := ref.loc.Offset - first.Offset
+		data, err := c.decode(ref.id, ref.loc, ref.wrapped, buf[at:at+ref.loc.Length])
+		if err != nil {
+			g.err, g.data = err, nil
+			return
+		}
+		g.data = append(g.data, data)
+	}
 }
 
 // chunkReader fetches, decrypts, decompresses and checks chunks.

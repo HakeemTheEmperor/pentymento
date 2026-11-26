@@ -54,6 +54,9 @@ type Printer struct {
 	// ErrTerminal reports whether stderr is a terminal, where progress is
 	// a redrawn line.
 	ErrTerminal bool
+	// OutTerminal reports whether stdout is a terminal, where binary
+	// output such as a dump must not go.
+	OutTerminal bool
 	// Location and Now give the local time zone and clock for human times.
 	Location *time.Location
 	Now      func() time.Time

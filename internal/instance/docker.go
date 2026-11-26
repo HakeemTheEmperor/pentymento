@@ -85,6 +85,23 @@ type dockerInstance struct {
 
 func (i *dockerInstance) Conn() Conn { return i.conn }
 
+// LastOutput returns the container's last lines of output (docker logs
+// writes the server's stdout and stderr to its own).
+func (i *dockerInstance) LastOutput(ctx context.Context) string {
+	bin, err := i.d.env.lookPath(exe("docker"))
+	if err != nil {
+		return ""
+	}
+	var out bytes.Buffer
+	var lines []string
+	_ = i.d.env.Runner.Run(ctx, &toolrun.Cmd{
+		Tool: "docker", Path: bin, RunID: i.spec.RunID, Stdout: &out,
+		Args:     []string{"logs", "--tail", "30", i.name},
+		OnStderr: func(l string) { lines = append(lines, l) },
+	})
+	return strings.TrimSpace(out.String() + "\n" + strings.Join(lines, "\n"))
+}
+
 // Start runs a container over spec.DataDir. An empty data directory is
 // initialized by the image with a random superuser password, passed in an
 // owner-only --env-file so it never appears on a command line. The port is

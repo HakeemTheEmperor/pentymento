@@ -47,6 +47,27 @@ type localInstance struct {
 
 func (i *localInstance) Conn() Conn { return i.conn }
 
+// LastOutput returns the server's last stderr lines once it has exited;
+// a server still running has nothing to explain.
+func (i *localInstance) LastOutput(context.Context) string {
+	if i.proc == nil {
+		return ""
+	}
+	select {
+	case <-i.proc.Done():
+	default:
+		return ""
+	}
+	var ee *toolrun.ExitError
+	switch err := i.proc.Wait(); {
+	case errors.As(err, &ee):
+		return fmt.Sprintf("exited with code %d:\n%s", ee.Code, strings.Join(ee.Stderr, "\n"))
+	case err != nil:
+		return err.Error()
+	}
+	return "the server exited"
+}
+
 // Start starts a server over spec.DataDir. An empty data directory is
 // initialized first, with a random superuser password; a directory that
 // already holds data is used as it is, and the engine must have arranged
