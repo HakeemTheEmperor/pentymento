@@ -41,7 +41,8 @@ jobs:
         with:
           go-version-file: go.mod
       # Both instance providers must work (Build Order C12): install the
-      # Postgres server binaries, and take mongod from the official image.
+      # Postgres server binaries, and take mongod from the official image,
+      # with mongodump for MongoDB snapshots (C14).
       - name: install local server binaries
         run: |
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
@@ -49,8 +50,10 @@ jobs:
           mkdir -p "$HOME/mongodb/bin"
           id=$(docker create "mongo:${PENTYM_TEST_MONGODB}")
           docker cp "$id:/usr/bin/mongod" "$HOME/mongodb/bin/mongod"
+          docker cp "$id:/usr/bin/mongodump" "$HOME/mongodb/bin/mongodump"
           docker rm "$id"
           "$HOME/mongodb/bin/mongod" --version
+          "$HOME/mongodb/bin/mongodump" --version
           echo "PENTYM_TEST_POSTGRES_BIN=/usr/lib/postgresql/${PENTYM_TEST_POSTGRES}/bin" >> "$GITHUB_ENV"
           echo "PENTYM_TEST_MONGODB_BIN=$HOME/mongodb/bin" >> "$GITHUB_ENV"
       - run: make test-integration

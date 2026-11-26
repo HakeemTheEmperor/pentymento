@@ -118,13 +118,18 @@ func StartPostgres(t testing.TB, version string) *Postgres {
 	return &Postgres{Version: version, ConnString: dsn, container: c}
 }
 
-// MongoDB is a running single-node MongoDB replica set.
+// MongoDB is a running MongoDB server: a single-node replica set, or a
+// standalone server from StartMongoDBStandalone.
 type MongoDB struct {
 	// Version is the image tag the container was started from.
 	Version string
-	// URI is the connection string for the replica set.
+	// URI is the connection string for the server, logged in as its root
+	// user: the server enforces authorization.
 	URI string
-	// ReplicaSet is the replica set name.
+	// TargetURI is URI without the user and password, as a pentym target
+	// configures it.
+	TargetURI string
+	// ReplicaSet is the replica set name; empty for a standalone.
 	ReplicaSet string
 }
 
@@ -135,7 +140,8 @@ func StartMongoDB(t testing.TB, version string) *MongoDB {
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
 
-	c, err := tcmongodb.Run(ctx, "mongo:"+version, tcmongodb.WithReplicaSet(replicaSetName))
+	c, err := tcmongodb.Run(ctx, "mongo:"+version, tcmongodb.WithReplicaSet(replicaSetName),
+		tcmongodb.WithUsername("root"), tcmongodb.WithPassword(randomPassword(t)))
 	testcontainers.CleanupContainer(t, c)
 	if err != nil {
 		t.Fatalf("start mongo:%s: %v", version, err)
@@ -148,7 +154,38 @@ func StartMongoDB(t testing.TB, version string) *MongoDB {
 	if err != nil {
 		t.Fatalf("mongo:%s connection string: %v", version, err)
 	}
-	return &MongoDB{Version: version, URI: uri, ReplicaSet: replicaSetName}
+	return &MongoDB{Version: version, URI: uri, TargetURI: withoutUser(t, uri), ReplicaSet: replicaSetName}
+}
+
+// StartMongoDBStandalone starts a MongoDB container of the given version as
+// a standalone server, with no replica set and so no oplog, and stops it
+// when the test finishes.
+func StartMongoDBStandalone(t testing.TB, version string) *MongoDB {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
+	defer cancel()
+
+	c, err := tcmongodb.Run(ctx, "mongo:"+version, tcmongodb.WithUsername("root"), tcmongodb.WithPassword(randomPassword(t)))
+	testcontainers.CleanupContainer(t, c)
+	if err != nil {
+		t.Fatalf("start mongo:%s: %v", version, err)
+	}
+	uri, err := c.ConnectionString(ctx)
+	if err != nil {
+		t.Fatalf("mongo:%s connection string: %v", version, err)
+	}
+	return &MongoDB{Version: version, URI: uri, TargetURI: withoutUser(t, uri)}
+}
+
+// withoutUser removes the user and password from a MongoDB URI.
+func withoutUser(t testing.TB, uri string) string {
+	t.Helper()
+	u, err := url.Parse(uri)
+	if err != nil {
+		t.Fatalf("parse the connection string: %v", err)
+	}
+	u.User = nil
+	return u.String()
 }
 
 // withDirectConnection sets directConnection=true on a MongoDB URI. The

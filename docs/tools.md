@@ -36,3 +36,16 @@ Compressed input cannot be deduplicated: a small change reshuffles every compres
 | `mongodump` | `--gzip` |
 
 `-Z 0` and `--compress=none`, which turn compression off, are allowed.
+
+## MongoDB snapshots with mongodump
+
+MongoDB snapshots are taken with `mongodump` from the [MongoDB Database Tools](https://www.mongodb.com/docs/database-tools/) (version 100 or later; the older `mongodump` that came with the server is refused). pentym looks for it in `tools.mongodb`, then on `PATH`, and runs:
+
+```text
+mongodump --uri=<uri> --username=<user> --config=<temporary file> --archive [--oplog]
+```
+
+- The target's `uri` holds no credentials; the password is only in the temporary `--config` file. With x.509 (`authMechanism=MONGODB-X509`) neither `--username` nor `--config` is passed.
+- `--archive` with no file name writes one archive to standard output, which streams into the repository as the snapshot's one stream, `mongodump.archive`.
+- `--oplog` is added on a replica set, so the archive restores to one consistent point. pentym reads the archive as it passes and records the first and last oplog timestamps it holds as the snapshot's start and end (`<seconds>:<ordinal>`). A standalone server has no oplog: its snapshot is taken without `--oplog`, records no positions, and allows no point-in-time recovery ([PTM-2011](errors/PTM-2011.md)).
+- A stream that is not a complete archive (wrong magic number, a document or block cut short, a collection left open) fails the backup, even if `mongodump` exited cleanly.

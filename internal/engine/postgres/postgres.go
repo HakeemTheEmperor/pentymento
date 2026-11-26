@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"os/exec"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/engine"
 	"github.com/HakeemTheEmperor/pentymento/internal/instance"
@@ -41,6 +40,12 @@ type Engine struct {
 
 var _ engine.Engine = (*Engine)(nil)
 
+func init() {
+	engine.Register("postgres", func(env engine.Env) engine.Engine {
+		return &Engine{Resolver: env.Resolver, Runner: env.Runner, ToolDirs: env.Tools.Postgres, Logger: env.Logger}
+	})
+}
+
 // Name is "postgres".
 func (*Engine) Name() string { return "postgres" }
 
@@ -58,13 +63,6 @@ func (e *Engine) logger() *slog.Logger {
 		return e.Logger
 	}
 	return slog.New(slog.DiscardHandler)
-}
-
-func (e *Engine) lookPath(name string) (string, error) {
-	if e.LookPath != nil {
-		return e.LookPath(name)
-	}
-	return exec.LookPath(name)
 }
 
 // Capture comes with the agent (C17).

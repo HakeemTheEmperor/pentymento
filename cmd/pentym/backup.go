@@ -14,7 +14,6 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/cliout"
 	"github.com/HakeemTheEmperor/pentymento/internal/config"
 	"github.com/HakeemTheEmperor/pentymento/internal/engine"
-	"github.com/HakeemTheEmperor/pentymento/internal/engine/postgres"
 	"github.com/HakeemTheEmperor/pentymento/internal/instance"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
 	"github.com/HakeemTheEmperor/pentymento/internal/ops"
@@ -22,27 +21,28 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/toolrun"
 )
 
-// newEngine returns the engine for a configured target. Tests replace it.
+// newEngine returns the engine for a configured target, through the
+// engine registry. Tests replace it.
 func (a *app) newEngine(cfg *config.Config, t config.Target) (engine.Engine, error) {
 	if a.engineFor != nil {
 		return a.engineFor(cfg, t)
 	}
-	switch t.Engine {
-	case "postgres":
-		workDir, err := cfg.WorkDirPath()
-		if err != nil {
-			return nil, err
-		}
-		return &postgres.Engine{
-			Resolver: a.resolver(),
-			Runner:   &toolrun.Runner{SecretDir: instance.SecretDir(workDir), Logger: a.tel.Component("toolrun")},
-			ToolDirs: cfg.Tools.Postgres,
-			Logger:   a.tel.Component("postgres"),
-		}, nil
+	workDir, err := cfg.WorkDirPath()
+	if err != nil {
+		return nil, err
 	}
-	return nil, &msg.Error{Code: msg.ExitNotImplemented, Message: msg.Message{
-		Level: msg.LevelFailed, Fact: t.Engine + " backups are not implemented in this build", Next: "pentym --help",
-	}}
+	e, err := engine.New(t.Engine, engine.Env{
+		Resolver: a.resolver(),
+		Runner:   &toolrun.Runner{SecretDir: instance.SecretDir(workDir), Logger: a.tel.Component("toolrun")},
+		Tools:    cfg.Tools,
+		Logger:   a.tel.Component(t.Engine),
+	})
+	if err != nil {
+		return nil, &msg.Error{Code: msg.ExitNotImplemented, Err: err, Message: msg.Message{
+			Level: msg.LevelFailed, Fact: t.Engine + " backups are not implemented in this build", Next: "pentym --help",
+		}}
+	}
+	return e, nil
 }
 
 // configTarget returns a configured target, or explains it is missing.
