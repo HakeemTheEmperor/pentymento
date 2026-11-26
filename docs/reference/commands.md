@@ -1,6 +1,6 @@
 # Commands
 
-Every command has `--help` with examples, prints its result on stdout (as JSON with `--json`), and exits with a stable [exit code](exit-codes.md). This page covers the commands that are built so far: `init`, `key`, `check` and `repo`.
+Every command has `--help` with examples, prints its result on stdout (as JSON with `--json`), and exits with a stable [exit code](exit-codes.md). This page covers the commands that are built so far: `init`, `key`, `check`, `repo` and `doctor`.
 
 Secrets never go on the command line. Flags that take a passphrase take a [secret reference](config.md#secrets) such as `env:NAME` or `file:/path`, and refuse a plain value. In a terminal, pentym asks for passphrases instead, without echoing them.
 
@@ -106,3 +106,17 @@ Both hold the exclusive lock and are journaled, and both take `--slot <id>`.
 `rebuild-index` writes the new index files before deleting the old ones, so an interrupted rebuild loses nothing. Packs whose trailer cannot be read are listed, and the command exits with code 7 ([PTM-7002](../errors/PTM-7002.md)).
 
 `upgrade` is the only thing that changes the repository format: upgrading pentym never does. Run it only after every pentym that uses the repository (agents, CLIs, CI jobs) is upgraded, because older versions refuse a newer format ([PTM-3001](../errors/PTM-3001.md)). In a terminal it lists the steps and asks for confirmation (default No; declining exits with code 9). Format 1 is the only format so far, so it reports that the repository is current.
+
+## `pentym doctor [target]`
+
+Checks what pentym needs on this machine and prints one row per check:
+
+| Check | Reports |
+| --- | --- |
+| `<engine> server` | Each directory in `tools.<engine>` or on PATH holding the server binary (`postgres`, `mongod`), with its version |
+| `<engine> tools` | The client tools (`pg_dump`, `pg_restore`, `pg_basebackup`, `initdb`, `pg_ctl`; `mongodump`, `mongorestore`) and their versions |
+| `docker` | Whether the Docker daemon is reachable, and its version |
+| `instance providers` | The `instance_provider` order and what each can start |
+| `repository` | The storage at `repository.path`, its capabilities, and a conditional-create test |
+
+With a target, only that target's engine is checked; otherwise the engines of the configured targets, or both when none is configured. Missing tools are failures when targets are configured, warnings otherwise. `doctor` exits with code 1 when a check fails; warnings alone exit 0. Connection and privilege checks for each target come with the engines.

@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -24,6 +25,14 @@ type Config struct {
 	AllowPlaintextSecrets bool `yaml:"allow_plaintext_secrets"`
 	// Repository is where backups are stored.
 	Repository Repository `yaml:"repository"`
+	// InstanceProvider lists the side-instance providers to try, in order:
+	// "docker" and "local". Empty means DefaultInstanceProviders.
+	InstanceProvider []string `yaml:"instance_provider"`
+	// WorkDir holds side-instance files and temporary credential files.
+	// Empty means DefaultWorkDir.
+	WorkDir string `yaml:"work_dir"`
+	// Tools are directories searched for database binaries before PATH.
+	Tools Tools `yaml:"tools"`
 	// Targets are the configured databases, by name.
 	Targets map[string]Target `yaml:"targets"`
 }
@@ -36,6 +45,50 @@ type Repository struct {
 	// Key is a reference to the passphrase, recovery code or age identity
 	// that unlocks a key slot when there is no terminal to ask in.
 	Key secrets.Ref `yaml:"key"`
+}
+
+// Tools lists, per engine, directories holding its binaries (postgres,
+// pg_ctl, pg_dump …; mongod, mongodump …). Several can be listed, such as
+// one per Postgres major version; the version check picks the match.
+type Tools struct {
+	Postgres []string `yaml:"postgres"`
+	MongoDB  []string `yaml:"mongodb"`
+}
+
+// Instance providers.
+const (
+	ProviderDocker = "docker"
+	ProviderLocal  = "local"
+)
+
+// DefaultInstanceProviders is the provider order when none is configured
+// (PRD 7.6).
+var DefaultInstanceProviders = []string{ProviderDocker, ProviderLocal}
+
+// Providers returns the configured provider order, or the default.
+func (c *Config) Providers() []string {
+	if len(c.InstanceProvider) == 0 {
+		return append([]string(nil), DefaultInstanceProviders...)
+	}
+	return append([]string(nil), c.InstanceProvider...)
+}
+
+// DefaultWorkDir returns the work directory used when work_dir is not
+// set: pentym/work in the user's cache directory.
+func DefaultWorkDir() (string, error) {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return "", fmt.Errorf("no work_dir configured and no cache directory: %w", err)
+	}
+	return filepath.Join(dir, "pentym", "work"), nil
+}
+
+// WorkDirPath returns work_dir, or the default.
+func (c *Config) WorkDirPath() (string, error) {
+	if c.WorkDir != "" {
+		return c.WorkDir, nil
+	}
+	return DefaultWorkDir()
 }
 
 // Target is one configured database.
@@ -102,6 +155,29 @@ func Load(path string, environ []string) (*Config, error) {
 func (c *Config) validate() error {
 	if p := c.Repository.Path; p != "" && !filepath.IsAbs(p) {
 		return fmt.Errorf("repository.path must be an absolute path, not %q", p)
+	}
+	if c.WorkDir != "" && !filepath.IsAbs(c.WorkDir) {
+		return fmt.Errorf("work_dir must be an absolute path, not %q", c.WorkDir)
+	}
+	seenProvider := map[string]bool{}
+	for _, p := range c.InstanceProvider {
+		if p != ProviderDocker && p != ProviderLocal {
+			return fmt.Errorf("instance_provider: %q is not a provider; use docker and/or local", p)
+		}
+		if seenProvider[p] {
+			return fmt.Errorf("instance_provider lists %s twice", p)
+		}
+		seenProvider[p] = true
+	}
+	for _, t := range []struct {
+		engine string
+		dirs   []string
+	}{{"postgres", c.Tools.Postgres}, {"mongodb", c.Tools.MongoDB}} {
+		for _, d := range t.dirs {
+			if !filepath.IsAbs(d) {
+				return fmt.Errorf("tools.%s: %q must be an absolute path", t.engine, d)
+			}
+		}
 	}
 	names := make([]string, 0, len(c.Targets))
 	for name := range c.Targets {
