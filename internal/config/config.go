@@ -107,6 +107,13 @@ type Target struct {
 	SSLRootCert string `yaml:"sslrootcert"`
 	SSLCert     string `yaml:"sslcert"`
 	SSLKey      string `yaml:"sslkey"`
+
+	// URI is a MongoDB target's connection string, such as
+	// mongodb://db1:27017,db2:27017/?replicaSet=rs0&tls=true. It holds no
+	// user name or password: those come from Credentials. Empty means
+	// mongodb://localhost:27017.
+	URI string `yaml:"uri"`
+
 	// Credentials are the roles pentym connects as, one per purpose
 	// (PRD 8.3).
 	Credentials Credentials `yaml:"credentials"`
@@ -248,8 +255,25 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-// validateConnection checks a target's connection settings.
+// validateConnection checks a target's connection settings: Postgres
+// targets use host, port, database and the ssl settings; MongoDB targets
+// use uri.
 func (t Target) validateConnection(name string) error {
+	if t.Engine == "mongodb" {
+		for _, f := range [][2]string{{"host", t.Host}, {"database", t.Database}, {"sslmode", t.SSLMode},
+			{"sslrootcert", t.SSLRootCert}, {"sslcert", t.SSLCert}, {"sslkey", t.SSLKey}} {
+			if f[1] != "" {
+				return fmt.Errorf("target %s: %s is for postgres targets; a mongodb target sets its connection in uri", name, f[0])
+			}
+		}
+		if t.Port != 0 {
+			return fmt.Errorf("target %s: port is for postgres targets; a mongodb target sets its connection in uri", name)
+		}
+		return validateMongoURI(name, t.URI)
+	}
+	if t.URI != "" {
+		return fmt.Errorf("target %s: uri is for mongodb targets; a postgres target uses host, port and database", name)
+	}
 	if t.Port < 0 || t.Port > 65535 {
 		return fmt.Errorf("target %s: port %d is not a TCP port", name, t.Port)
 	}
@@ -259,6 +283,43 @@ func (t Target) validateConnection(name string) error {
 	for _, f := range [][2]string{{"sslrootcert", t.SSLRootCert}, {"sslcert", t.SSLCert}, {"sslkey", t.SSLKey}} {
 		if f[1] != "" && !filepath.IsAbs(f[1]) {
 			return fmt.Errorf("target %s: %s must be an absolute path, not %q", name, f[0], f[1])
+		}
+	}
+	return nil
+}
+
+// validateMongoURI checks the form of a MongoDB connection string without
+// resolving it (a mongodb+srv URI needs DNS, which waits for connecting),
+// and refuses one that holds credentials: the config holds secrets only
+// as references. Errors never quote the URI.
+func validateMongoURI(name, uri string) error {
+	if uri == "" {
+		return nil
+	}
+	rest, ok := strings.CutPrefix(uri, "mongodb://")
+	if !ok {
+		if rest, ok = strings.CutPrefix(uri, "mongodb+srv://"); !ok {
+			return fmt.Errorf("target %s: uri must start with mongodb:// or mongodb+srv://", name)
+		}
+	}
+	authority, query := rest, ""
+	if i := strings.IndexAny(rest, "/?"); i >= 0 {
+		authority = rest[:i]
+		if _, q, found := strings.Cut(rest[i:], "?"); found {
+			query = q
+		}
+	}
+	if strings.Contains(authority, "@") {
+		return fmt.Errorf("target %s: uri must not hold a user name or password; set credentials.backup.user, and its password as a secret reference", name)
+	}
+	if authority == "" {
+		return fmt.Errorf("target %s: uri names no host", name)
+	}
+	for _, kv := range strings.Split(query, "&") {
+		k, _, _ := strings.Cut(kv, "=")
+		switch strings.ToLower(k) {
+		case "tlscertificatekeyfilepassword", "sslpemkeypassword":
+			return fmt.Errorf("target %s: uri must not hold a password (%s)", name, k)
 		}
 	}
 	return nil

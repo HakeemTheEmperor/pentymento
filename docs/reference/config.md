@@ -30,7 +30,8 @@ Unknown keys are rejected with the file and line, so a misspelt key never passes
 | `targets.<name>.host`, `.port`, `.database` | Where the Postgres server is; `host` may be a Unix socket directory; empty values use the libpq defaults |
 | `targets.<name>.sslmode` | `disable`, `allow`, `prefer` (default), `require`, `verify-ca` or `verify-full` |
 | `targets.<name>.sslrootcert`, `.sslcert`, `.sslkey` | Certificate and key files, absolute paths |
-| `targets.<name>.credentials.backup.user` | The role base backups connect as; it needs `REPLICATION` |
+| `targets.<name>.uri` | Where the MongoDB server or replica set is: a connection string such as `mongodb://db1:27017,db2:27017/?replicaSet=rs0&tls=true`, or `mongodb+srv://…`; default `mongodb://localhost:27017`. It must not hold a user name or password. MongoDB targets only; Postgres targets use `host`, `port` and `database` |
+| `targets.<name>.credentials.backup.user` | The role (Postgres) or user (MongoDB) base backups connect as. Postgres needs `REPLICATION`; MongoDB needs the `backup` role and read on `local`. Leave it out for MongoDB x.509 (`authMechanism=MONGODB-X509` in `uri`) |
 | `targets.<name>.credentials.backup.password` | A [secret reference](#secrets) to its password; leave it out for certificates, peer authentication or `.pgpass` |
 | `instance_provider` | Side-instance providers to try, in order: `docker`, `local`; default `[docker, local]` |
 | `work_dir` | Directory for side-instance files and temporary credential files; must be absolute; default `pentym/work` in the user's cache directory |
@@ -52,6 +53,11 @@ targets:
         password: env:PG_BACKUP_PW
   prod-mg:
     engine: mongodb
+    uri: mongodb://db1:27017,db2:27017,db3:27017/?replicaSet=rs0&tls=true
+    credentials:
+      backup:
+        user: pentym_backup
+        password: env:MG_BACKUP_PW
 ```
 
 ## Repository

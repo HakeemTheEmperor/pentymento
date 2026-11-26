@@ -16,12 +16,31 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/engine"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
 	"github.com/HakeemTheEmperor/pentymento/internal/repo"
+	"github.com/HakeemTheEmperor/pentymento/internal/telemetry"
 )
 
 // cliFakeEngine streams a small base.tar and a manifest.
 type cliFakeEngine struct{ engine.Engine }
 
 func (cliFakeEngine) Name() string { return "postgres" }
+
+// TestNewEngine builds each configured target's engine through the
+// registry: no command names an engine.
+func TestNewEngine(t *testing.T) {
+	c := backupEnv(t, "env:K1")
+	a := newApp(strings.NewReader(""), &bytes.Buffer{}, &bytes.Buffer{}, func(k string) string { return c.env[k] })
+	a.tel = telemetry.New(telemetry.Discard(), nil)
+	cfg, err := config.Load(c.config, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{"prod-pg": "postgres", "prod-mg": "mongodb"} {
+		e, err := a.newEngine(cfg, cfg.Targets[name])
+		if err != nil || e.Name() != want {
+			t.Errorf("%s: %v, %v", name, e, err)
+		}
+	}
+}
 
 func (cliFakeEngine) Check(context.Context, engine.Target) (*engine.CheckResult, error) {
 	return &engine.CheckResult{ServerVersion: "17.2", Findings: []engine.Finding{
@@ -119,7 +138,6 @@ func TestBackupCommandRefusals(t *testing.T) {
 		fact string
 	}{
 		{[]string{"backup", "nosuch"}, msg.ExitNotFound, "no target nosuch in the config"},
-		{[]string{"backup", "prod-mg"}, msg.ExitNotImplemented, "mongodb backups are not implemented in this build"},
 		{[]string{"backup", "prod-pg", "--now"}, msg.ExitNotImplemented, "--now needs the agent, which is not implemented in this build"},
 	} {
 		r := c.runFake(append([]string{"--json"}, tt.args...)...)

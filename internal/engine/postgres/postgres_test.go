@@ -149,7 +149,7 @@ func fakeEngine(t *testing.T, mode string, env map[string]string) (*Engine, stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, exeName("pg_basebackup")), b, 0o700); err != nil { // #nosec G306 G703 -- an executable
+	if err := os.WriteFile(filepath.Join(dir, toolrun.ExeName("pg_basebackup")), b, 0o700); err != nil { // #nosec G306 G703 -- an executable
 		t.Fatal(err)
 	}
 	log := filepath.Join(t.TempDir(), "log.json")

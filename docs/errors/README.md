@@ -33,6 +33,12 @@ IDs are permanent: an ID is never reused and never changes meaning.
 | [PTM-2004](PTM-2004.md) | postgres-role-too-privileged |
 | [PTM-2005](PTM-2005.md) | postgres-wal-level-minimal |
 | [PTM-2006](PTM-2006.md) | postgres-replication-refused |
+| [PTM-2007](PTM-2007.md) | mongodb-connect-failed |
+| [PTM-2008](PTM-2008.md) | mongodb-version-unsupported |
+| [PTM-2009](PTM-2009.md) | mongodb-privilege-missing |
+| [PTM-2010](PTM-2010.md) | mongodb-role-too-privileged |
+| [PTM-2011](PTM-2011.md) | mongodb-standalone |
+| [PTM-2012](PTM-2012.md) | mongodb-sharded-unsupported |
 | [PTM-3001](PTM-3001.md) | repository-format-newer |
 | [PTM-3002](PTM-3002.md) | repository-not-found |
 | [PTM-3003](PTM-3003.md) | repository-exists |

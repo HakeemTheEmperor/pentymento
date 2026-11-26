@@ -6,8 +6,10 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -15,11 +17,15 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/config"
 	"github.com/HakeemTheEmperor/pentymento/internal/instance"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
+	"github.com/HakeemTheEmperor/pentymento/internal/secrets"
+	"github.com/HakeemTheEmperor/pentymento/internal/toolrun"
 )
 
-// This is the draft engine interface (SDD 4.2), written before either
-// engine exists. It is finalized at milestone M2 against the Postgres
-// (C13) and MongoDB (C14) implementations, so expect changes then.
+// This is the engine interface (SDD 4.2), finalized against the Postgres
+// (C13) and MongoDB (C14) engines: callers use only this interface and
+// build engines through the registry, so no caller names an engine. The
+// capture, restore and verification methods are fixed here and filled in
+// by later chunks.
 
 // Capabilities are what an engine supports (SDD 4.2, first row).
 type Capabilities struct {
@@ -71,11 +77,14 @@ type CheckResult struct {
 // records besides its chunks.
 type BaseBackup struct {
 	EngineVersion string
-	// Method is how the backup was taken, such as "native" or
-	// "pg_basebackup".
+	// Method is how the backup was taken: "native" or "pg_basebackup"
+	// (Postgres), "mongodump" (MongoDB).
 	Method string
-	// SystemID identifies the database cluster (Postgres) or replica set.
-	SystemID   string
+	// SystemID identifies the database cluster (Postgres) or replica set
+	// (MongoDB, its set name); empty for a MongoDB standalone.
+	SystemID string
+	// Start and End are the log positions the snapshot covers; a MongoDB
+	// standalone has no oplog, so neither.
 	Start, End Position
 	// Timeline is the Postgres timeline; empty for MongoDB.
 	Timeline  string
@@ -213,38 +222,60 @@ type Engine interface {
 	VerifyContents(ctx context.Context, inst instance.Instance, inventory json.RawMessage) ([]Finding, error)
 }
 
-var (
-	mu      sync.RWMutex
-	engines = map[string]Engine{}
-)
-
-// Register makes an engine available by its name. Engines register once,
-// at start-up; registering a name twice panics.
-func Register(e Engine) {
-	mu.Lock()
-	defer mu.Unlock()
-	if _, ok := engines[e.Name()]; ok {
-		panic("engine registered twice: " + e.Name())
-	}
-	engines[e.Name()] = e
+// Env is what an engine needs from the run that uses it.
+type Env struct {
+	// Resolver resolves the target's secret references.
+	Resolver secrets.Resolver
+	// Runner runs the engine's client tools.
+	Runner *toolrun.Runner
+	// Tools are the configured tool directories; each engine searches its
+	// own (tools.postgres, tools.mongodb) before PATH.
+	Tools config.Tools
+	// Logger receives the engine's warnings; nil discards them.
+	Logger *slog.Logger
 }
 
-// Get returns the engine for a configured engine name.
-func Get(name string) (Engine, error) {
-	mu.RLock()
-	defer mu.RUnlock()
-	if e, ok := engines[name]; ok {
-		return e, nil
+// Factory builds an engine for a run.
+type Factory func(Env) Engine
+
+var (
+	mu        sync.RWMutex
+	factories = map[string]Factory{}
+)
+
+// Register makes an engine available by its configured name, such as
+// "postgres". Engine packages register in init; registering a name twice
+// panics.
+func Register(name string, f Factory) {
+	mu.Lock()
+	defer mu.Unlock()
+	if _, ok := factories[name]; ok {
+		panic("engine registered twice: " + name)
 	}
-	return nil, fmt.Errorf("engine %q is not available in this build", name)
+	factories[name] = f
+}
+
+// ErrUnavailable means no engine is registered under a name.
+var ErrUnavailable = errors.New("engine not available in this build")
+
+// New builds the engine for a configured engine name, so callers never
+// name an engine themselves.
+func New(name string, env Env) (Engine, error) {
+	mu.RLock()
+	f, ok := factories[name]
+	mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("%w: %q", ErrUnavailable, name)
+	}
+	return f(env), nil
 }
 
 // Names returns the registered engines' names, sorted.
 func Names() []string {
 	mu.RLock()
 	defer mu.RUnlock()
-	out := make([]string, 0, len(engines))
-	for n := range engines {
+	out := make([]string, 0, len(factories))
+	for n := range factories {
 		out = append(out, n)
 	}
 	sort.Strings(out)

@@ -267,15 +267,5 @@ func (e *Engine) pgBasebackup(ctx context.Context, t engine.Target, sink engine.
 
 // findTool finds a client tool in tools.postgres, then on PATH.
 func (e *Engine) findTool(name string) (string, error) {
-	for _, d := range e.ToolDirs {
-		p := filepath.Join(d, exeName(name))
-		if fileExists(p) {
-			return p, nil
-		}
-	}
-	p, err := e.lookPath(name)
-	if err != nil {
-		return "", fmt.Errorf("%s is not in tools.postgres or on PATH", name)
-	}
-	return p, nil
+	return toolrun.Find(name, "postgres", e.ToolDirs, e.LookPath)
 }
