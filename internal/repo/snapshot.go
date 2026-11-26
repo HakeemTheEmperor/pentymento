@@ -74,6 +74,10 @@ func (s *Snapshot) TotalSize() int64 {
 	return n
 }
 
+// Streams returns the snapshot's streams in order: the main one, then the
+// parts.
+func (s *Snapshot) Streams() []Part { return s.streams() }
+
 // streams returns every stream as a part: the main one first.
 func (s *Snapshot) streams() []Part {
 	return append([]Part{{Name: s.Name, Size: s.Size, Chunks: s.Chunks, List: s.List}}, s.Parts...)

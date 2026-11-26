@@ -1,6 +1,6 @@
 # Commands
 
-Every command has `--help` with examples, prints its result on stdout (as JSON with `--json`), and exits with a stable [exit code](exit-codes.md). This page covers the commands that are built so far: `init`, `key`, `check`, `repo`, `doctor`, `backup` and `list`.
+Every command has `--help` with examples, prints its result on stdout (as JSON with `--json`), and exits with a stable [exit code](exit-codes.md). This page covers the commands that are built so far: `init`, `key`, `check`, `repo`, `doctor`, `backup`, `list` and `dump`.
 
 Secrets never go on the command line. Flags that take a passphrase take a [secret reference](config.md#secrets) such as `env:NAME` or `file:/path`, and refuse a plain value. In a terminal, pentym asks for passphrases instead, without echoing them.
 
@@ -140,3 +140,26 @@ It unlocks the repository with any key slot; an agent slot is enough. It prints 
 ## `pentym list`
 
 Lists the snapshots, oldest first: ID, target, engine and version, start time, duration, size of all its streams, and whether it is pinned (with the reason). `--json` adds the log positions, the timeline, the streams and the backup method. It unlocks the repository with any key slot. Log coverage is added with continuous capture.
+
+## `pentym dump <snapshot>`
+
+Exports a snapshot as a plain file, decrypted and reassembled, so the data is never locked in: the database's own tools restore it without pentym (PRD 7.1).
+
+| Snapshot | File |
+| --- | --- |
+| Postgres | A tar holding the snapshot's archives: `base.tar`, one `<oid>.tar` per tablespace, and `backup_manifest` when the backup has one. This is the layout `pg_basebackup --format=tar` writes to a directory. |
+| MongoDB | The `mongodump` archive as stored, which `mongorestore --archive` reads (add `--oplogReplay` for a replica-set snapshot). |
+
+```sh
+pentym dump 3f9c2a7d18e04b6f9a1c5d2e7b8f0a14 --output prod-pg.tar
+pentym dump 9b1e0c4f7a2d48e6b3c5f1a8d0e7c2b4 | mongorestore --archive --oplogReplay
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--output <file>` | Write to this file, which must not exist yet. It is created readable only by its owner and removed if the dump fails. |
+| `--slot <id>` | Unlock with this key slot |
+
+Without `--output` the dump goes to stdout, which must not be a terminal; `--json` then has nowhere to go, so it needs `--output`. The snapshot ID is the full ID that `pentym list` shows. The dump streams with constant memory, reading chunks in parallel ahead of the writer, and checks every chunk against its ID; it needs a full key slot and is recorded in the journal.
+
+To restore a Postgres dump by hand, unpack it, then restore the archives as you would a tar-format `pg_basebackup`: `base.tar` into an empty data directory and each `<oid>.tar` into its tablespace's directory. The snapshot includes the WAL it needs, which Postgres replays when it starts.

@@ -67,7 +67,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.checkCommand(),
 		pruneCommand(),
 		pinCommand(),
-		dumpCommand(),
+		a.dumpCommand(),
 		historyCommand(),
 		a.keyCommand(),
 		a.repoCommand(),
@@ -194,11 +194,6 @@ func pinCommand() *cobra.Command {
 		"Pin a snapshot before a migration", `pentym pin <snapshot> --reason "pre-migration"`)
 	c.Flags().String("reason", "", "why the snapshot is pinned")
 	return c
-}
-
-func dumpCommand() *cobra.Command {
-	return stub("dump <snapshot>", "Export a snapshot as a plain file", args("<snapshot>"),
-		"Export a snapshot", "pentym dump <snapshot>")
 }
 
 func historyCommand() *cobra.Command {
