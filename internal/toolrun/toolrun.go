@@ -85,6 +85,9 @@ type Cmd struct {
 	Stdout io.Writer
 	// RunID tags the logged stderr lines (SDD 9.x run_id).
 	RunID string
+	// OnStderr, if set, receives each stderr line after secrets are
+	// scrubbed, for tools that report results there.
+	OnStderr func(line string)
 }
 
 // ExitError is a tool that exited unsuccessfully.
@@ -256,7 +259,7 @@ func (r *Runner) Start(c *Cmd) (_ *Process, err error) {
 	if cmd.Stdout == nil {
 		cmd.Stdout = io.Discard
 	}
-	stderr := &lineLogger{logger: r.Logger, tool: c.Tool, runID: c.RunID, secrets: c.Secrets}
+	stderr := &lineLogger{logger: r.Logger, tool: c.Tool, runID: c.RunID, secrets: c.Secrets, onLine: c.OnStderr}
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		g.close()
@@ -350,6 +353,7 @@ type lineLogger struct {
 	tool    string
 	runID   string
 	secrets []secrets.Secret
+	onLine  func(string)
 
 	mu      sync.Mutex
 	partial []byte
@@ -388,6 +392,9 @@ func (l *lineLogger) emit() {
 	line = secrets.Scrub(line, l.secrets...)
 	if l.logger != nil {
 		l.logger.Warn("tool stderr", slog.String("tool", l.tool), slog.String("run_id", l.runID), slog.String("line", line))
+	}
+	if l.onLine != nil {
+		l.onLine(line)
 	}
 	l.last = append(l.last, line)
 	if len(l.last) > stderrTail {

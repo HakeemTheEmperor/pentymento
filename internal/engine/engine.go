@@ -71,10 +71,25 @@ type CheckResult struct {
 // records besides its chunks.
 type BaseBackup struct {
 	EngineVersion string
-	Start, End    Position
+	// Method is how the backup was taken, such as "native" or
+	// "pg_basebackup".
+	Method string
+	// SystemID identifies the database cluster (Postgres) or replica set.
+	SystemID   string
+	Start, End Position
 	// Timeline is the Postgres timeline; empty for MongoDB.
 	Timeline  string
 	Inventory json.RawMessage
+}
+
+// ArchiveSink receives a base backup's archives in order. A Postgres
+// backup has base.tar, one <oid>.tar per tablespace, and backup_manifest;
+// a MongoDB backup has one archive. Each is stored as its own stream, so
+// no framing between them disturbs deduplication.
+type ArchiveSink interface {
+	// Archive ends the previous archive, if any, and returns a writer for
+	// the next one.
+	Archive(ctx context.Context, name string) (io.Writer, error)
 }
 
 // Segment is one unit of captured log data, stored as one object: a WAL
@@ -174,10 +189,11 @@ type Engine interface {
 	// Check connects and checks the server version, the role and its
 	// privileges, for doctor and before a backup.
 	Check(ctx context.Context, t Target) (*CheckResult, error)
-	// BaseBackup streams a base backup to w and describes it. It returns
-	// only after the stream and any child process finished cleanly; an
-	// error means the stream must not become a snapshot.
-	BaseBackup(ctx context.Context, t Target, w io.Writer) (*BaseBackup, error)
+	// BaseBackup streams a base backup into sink, one archive after
+	// another, and describes it. It returns only after the stream and any
+	// child process finished cleanly; an error means nothing it wrote may
+	// become a snapshot.
+	BaseBackup(ctx context.Context, t Target, sink ArchiveSink) (*BaseBackup, error)
 	// Capture streams the log from a checkpoint into sink until ctx ends.
 	Capture(ctx context.Context, t Target, from Position, sink LogSink) error
 	// DetectGap reports whether the log since a checkpoint can still be

@@ -27,6 +27,11 @@ Unknown keys are rejected with the file and line, so a misspelt key never passes
 | `repository.path` | The repository directory on local storage; must be absolute |
 | `repository.key` | A [secret reference](#secrets) to what unlocks a key slot when there is no terminal to ask in |
 | `targets.<name>.engine` | `postgres` or `mongodb` |
+| `targets.<name>.host`, `.port`, `.database` | Where the Postgres server is; `host` may be a Unix socket directory; empty values use the libpq defaults |
+| `targets.<name>.sslmode` | `disable`, `allow`, `prefer` (default), `require`, `verify-ca` or `verify-full` |
+| `targets.<name>.sslrootcert`, `.sslcert`, `.sslkey` | Certificate and key files, absolute paths |
+| `targets.<name>.credentials.backup.user` | The role base backups connect as; it needs `REPLICATION` |
+| `targets.<name>.credentials.backup.password` | A [secret reference](#secrets) to its password; leave it out for certificates, peer authentication or `.pgpass` |
 | `instance_provider` | Side-instance providers to try, in order: `docker`, `local`; default `[docker, local]` |
 | `work_dir` | Directory for side-instance files and temporary credential files; must be absolute; default `pentym/work` in the user's cache directory |
 | `tools.postgres`, `tools.mongodb` | Directories of database binaries, searched before PATH; must be absolute |
@@ -37,6 +42,14 @@ A target name is lowercase letters, digits, `-` and `_`, starts with a letter or
 targets:
   prod-pg:
     engine: postgres
+    host: db.internal
+    port: 5432
+    sslmode: verify-full
+    sslrootcert: /etc/pentym/db-ca.pem
+    credentials:
+      backup:
+        user: pentym_backup
+        password: env:PG_BACKUP_PW
   prod-mg:
     engine: mongodb
 ```

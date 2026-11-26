@@ -9,6 +9,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"net/url"
 	"os"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/testcontainers/testcontainers-go"
+	tcexec "github.com/testcontainers/testcontainers-go/exec"
 	tcmongodb "github.com/testcontainers/testcontainers-go/modules/mongodb"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
@@ -71,6 +73,25 @@ type Postgres struct {
 	// ConnString is a libpq connection URL for the superuser. It contains
 	// a random test password and must not be logged.
 	ConnString string
+
+	container *tcpostgres.PostgresContainer
+}
+
+// Exec runs a command inside the container and returns its output; a
+// non-zero exit code fails the test.
+func (p *Postgres) Exec(t testing.TB, cmd ...string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	code, r, err := p.container.Exec(ctx, cmd, tcexec.Multiplexed())
+	if err != nil {
+		t.Fatalf("exec %v: %v", cmd, err)
+	}
+	out, _ := io.ReadAll(r)
+	if code != 0 {
+		t.Fatalf("exec %v: exit code %d: %s", cmd, code, out)
+	}
+	return string(out)
 }
 
 // StartPostgres starts a Postgres container of the given major version and
@@ -94,7 +115,7 @@ func StartPostgres(t testing.TB, version string) *Postgres {
 	if err != nil {
 		t.Fatalf("postgres:%s connection string: %v", version, err)
 	}
-	return &Postgres{Version: version, ConnString: dsn}
+	return &Postgres{Version: version, ConnString: dsn, container: c}
 }
 
 // MongoDB is a running single-node MongoDB replica set.

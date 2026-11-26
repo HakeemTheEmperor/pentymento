@@ -95,7 +95,39 @@ func (c *Config) WorkDirPath() (string, error) {
 type Target struct {
 	// Engine is postgres or mongodb.
 	Engine string `yaml:"engine"`
+
+	// Connection (Postgres). Host is a host name or a Unix socket
+	// directory; empty means the libpq default.
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	Database string `yaml:"database"`
+	// SSLMode is a libpq sslmode: disable, allow, prefer (the default),
+	// require, verify-ca or verify-full.
+	SSLMode     string `yaml:"sslmode"`
+	SSLRootCert string `yaml:"sslrootcert"`
+	SSLCert     string `yaml:"sslcert"`
+	SSLKey      string `yaml:"sslkey"`
+	// Credentials are the roles pentym connects as, one per purpose
+	// (PRD 8.3).
+	Credentials Credentials `yaml:"credentials"`
 }
+
+// Credentials are a target's roles by purpose. Replication (capture) and
+// restore credentials are added by the chunks that use them.
+type Credentials struct {
+	// Backup takes base backups.
+	Backup Credential `yaml:"backup"`
+}
+
+// Credential is a role and, optionally, a reference to its password;
+// certificates, peer authentication and .pgpass need none.
+type Credential struct {
+	User     string      `yaml:"user"`
+	Password secrets.Ref `yaml:"password"`
+}
+
+// SSLModes are the accepted sslmode values.
+var SSLModes = []string{"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
 
 // Engines are the supported engine names.
 var Engines = []string{"postgres", "mongodb"}
@@ -200,6 +232,9 @@ func (c *Config) validate() error {
 		if !contains(Engines, t.Engine) {
 			return fmt.Errorf("target %s: engine must be %s, not %q", name, strings.Join(Engines, " or "), t.Engine)
 		}
+		if err := t.validateConnection(name); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -211,4 +246,20 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// validateConnection checks a target's connection settings.
+func (t Target) validateConnection(name string) error {
+	if t.Port < 0 || t.Port > 65535 {
+		return fmt.Errorf("target %s: port %d is not a TCP port", name, t.Port)
+	}
+	if t.SSLMode != "" && !contains(SSLModes, t.SSLMode) {
+		return fmt.Errorf("target %s: sslmode must be one of %s, not %q", name, strings.Join(SSLModes, ", "), t.SSLMode)
+	}
+	for _, f := range [][2]string{{"sslrootcert", t.SSLRootCert}, {"sslcert", t.SSLCert}, {"sslkey", t.SSLKey}} {
+		if f[1] != "" && !filepath.IsAbs(f[1]) {
+			return fmt.Errorf("target %s: %s must be an absolute path, not %q", name, f[0], f[1])
+		}
+	}
+	return nil
 }
