@@ -228,7 +228,7 @@ func TestReplicaSet(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if position(sum.OplogFirst) != bb.Start || position(sum.OplogLast) != bb.End || sum.Namespaces < 2 {
+			if Position(sum.OplogFirst) != bb.Start || Position(sum.OplogLast) != bb.End || sum.Namespaces < 2 {
 				t.Errorf("archive = %+v, backup %s..%s", sum, bb.Start, bb.End)
 			}
 			t.Logf("%d bytes, %d namespaces, %d oplog entries, %d writes during the test", sink.data[ArchiveName].Len(), sum.Namespaces, sum.OplogEntries, s.writes.Load())

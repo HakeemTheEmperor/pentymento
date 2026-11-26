@@ -173,8 +173,8 @@ func supported(version string) bool {
 	return err == nil && slices.Contains(Versions, fmt.Sprintf("%d.%d", v.Major, v.Minor))
 }
 
-// position formats an oplog timestamp as a log position, in the
+// Position formats an oplog timestamp as a log position, in the
 // <seconds>:<ordinal> form mongorestore --oplogLimit takes.
-func position(ts bson.Timestamp) engine.Position {
+func Position(ts bson.Timestamp) engine.Position {
 	return engine.Position(fmt.Sprintf("%d:%d", ts.T, ts.I))
 }

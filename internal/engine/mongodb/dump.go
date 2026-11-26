@@ -47,7 +47,7 @@ func (e *Engine) BaseBackup(ctx context.Context, t engine.Target, sink engine.Ar
 		if sum.OplogEntries == 0 {
 			return nil, errors.New("the mongodump archive holds no oplog entries, so its consistent point is unknown")
 		}
-		bb.Start, bb.End = position(sum.OplogFirst), position(sum.OplogLast)
+		bb.Start, bb.End = Position(sum.OplogFirst), Position(sum.OplogLast)
 	}
 	return bb, nil
 }

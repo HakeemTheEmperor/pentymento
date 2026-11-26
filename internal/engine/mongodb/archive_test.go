@@ -86,7 +86,7 @@ func TestReadArchive(t *testing.T) {
 		sum.OplogFirst != (bson.Timestamp{T: 1732600000, I: 1}) || sum.OplogLast != (bson.Timestamp{T: 1732600005, I: 1}) {
 		t.Errorf("summary = %+v", sum)
 	}
-	if p := position(sum.OplogLast); p != "1732600005:1" {
+	if p := Position(sum.OplogLast); p != "1732600005:1" {
 		t.Errorf("position = %s", p)
 	}
 

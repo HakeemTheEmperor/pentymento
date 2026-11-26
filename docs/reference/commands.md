@@ -133,7 +133,9 @@ Takes a base backup of a target and commits it as a snapshot (SDD 6.1):
 
 For Postgres, the backup uses `BASE_BACKUP` over a replication connection, falling back to `pg_basebackup` for clusters without tablespaces. It includes the WAL the snapshot needs to restore on its own, and a temporary replication slot keeps the server from removing that WAL during the backup. Each archive (`base.tar`, one per tablespace, and the backup manifest) is stored as its own stream.
 
-It unlocks the repository with any key slot; an agent slot is enough. It prints the snapshot ID on stdout, and with `--json` the snapshot and what the backup stored. `--now`, which runs the backup through the agent, is not built yet. MongoDB backups are not built yet.
+For MongoDB, the backup runs `mongodump --archive` from the [Database Tools](../tools.md#mongodb-snapshots-with-mongodump) and stores the archive as one stream, `mongodump.archive`. On a replica set it adds `--oplog`, so the snapshot restores to one consistent point, and records the first and last oplog timestamps it holds as its log positions. A standalone server has no oplog: its snapshots are taken without one, record no positions, and allow no point-in-time recovery, which the backup reports as a warning ([PTM-2011](../errors/PTM-2011.md)). Sharded clusters are refused.
+
+It unlocks the repository with any key slot; an agent slot is enough. It prints the snapshot ID on stdout, and with `--json` the snapshot and what the backup stored. `--now`, which runs the backup through the agent, is not built yet.
 
 ## `pentym list`
 
