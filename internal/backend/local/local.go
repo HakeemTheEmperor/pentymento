@@ -146,7 +146,10 @@ func (b *Backend) Get(ctx context.Context, key string, rng *backend.Range) (io.R
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	f, err := os.Open(b.path(key))
+	// A file just published can be briefly locked on Windows (antivirus,
+	// indexers), as for Put's rename.
+	var f *os.File
+	err := withRetry(func() (err error) { f, err = os.Open(b.path(key)); return err })
 	if err != nil {
 		return nil, mapNotFound(key, err)
 	}

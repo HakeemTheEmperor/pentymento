@@ -53,12 +53,20 @@ func pgEngine(dir string) *postgres.Engine {
 }
 
 // captureChildMain runs an agent that captures the test server, printing
-// its checkpoints, until its stdin closes.
+// its checkpoints, until its stdin closes. The server is MongoDB when
+// envMGURI is set, Postgres otherwise; the target is called prod-pg either
+// way, which the shared helpers expect.
 func captureChildMain(dir string) int {
-	port, _ := strconv.Atoi(os.Getenv(envPGPort))
-	cfg := &config.Config{Targets: map[string]config.Target{"prod-pg": pgCaptureTarget(os.Getenv(envPGHost), port)}}
+	var target config.Target
+	var eng engine.Engine
+	if uri := os.Getenv(envMGURI); uri != "" {
+		target, eng = mgCaptureTarget(uri), mgEngine(os.TempDir())
+	} else {
+		port, _ := strconv.Atoi(os.Getenv(envPGPort))
+		target, eng = pgCaptureTarget(os.Getenv(envPGHost), port), pgEngine(os.TempDir())
+	}
+	cfg := &config.Config{Targets: map[string]config.Target{"prod-pg": target}}
 	r := openAs(&childTB{}, dir, nil, "agent")
-	eng := pgEngine(os.TempDir())
 	out := &syncWriter{w: os.Stdout}
 	a, err := New(Options{
 		Config: cfg, Repo: r, Host: "child", Timings: fastTimings, Heartbeat: 100 * time.Millisecond,

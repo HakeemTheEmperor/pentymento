@@ -44,6 +44,8 @@ type Engine struct {
 	Logger *slog.Logger
 	// RunID tags child processes' logs.
 	RunID string
+	// Observer, if set, receives captured oplog entries as they arrive.
+	Observer OplogObserver
 }
 
 var _ engine.Engine = (*Engine)(nil)
@@ -70,21 +72,6 @@ func (*Engine) Capabilities() engine.Capabilities {
 // findTool finds a database tool in tools.mongodb, then on PATH.
 func (e *Engine) findTool(name string) (string, error) {
 	return toolrun.Find(name, "mongodb", e.ToolDirs, e.LookPath)
-}
-
-// Capture comes with the agent.
-func (*Engine) Capture(context.Context, engine.Target, engine.Position, engine.LogSink) error {
-	return errNotYet
-}
-
-// DetectGap comes with the agent.
-func (*Engine) DetectGap(context.Context, engine.Target, engine.Position) (*engine.Gap, error) {
-	return nil, errNotYet
-}
-
-// LogHealth comes with oplog capture.
-func (*Engine) LogHealth(context.Context, engine.Target) (*engine.LogHealth, error) {
-	return nil, errNotYet
 }
 
 // Extract comes with restores.

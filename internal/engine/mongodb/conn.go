@@ -106,6 +106,12 @@ func (e *Engine) connect(ctx context.Context, t engine.Target) (*session, error)
 	if err != nil {
 		return nil, err
 	}
+	return e.connectAs(ctx, t, cred)
+}
+
+// connectAs connects with a credential and asks the server for its
+// topology.
+func (e *Engine) connectAs(ctx context.Context, t engine.Target, cred config.Credential) (*session, error) {
 	pw, err := e.password(ctx, t.Name, cred)
 	if err != nil {
 		return nil, err
@@ -127,20 +133,20 @@ func (e *Engine) connect(ctx context.Context, t engine.Target) (*session, error)
 	}
 	cl, err := mongo.Connect(opts)
 	if err != nil {
-		return nil, connectError(t, err, pw)
+		return nil, connectError(t, cred.User, err, pw)
 	}
 	var h hello
 	if err := cl.Database("admin").RunCommand(ctx, bson.D{{Key: "hello", Value: 1}}).Decode(&h); err != nil {
 		_ = cl.Disconnect(context.WithoutCancel(ctx))
-		return nil, connectError(t, err, pw)
+		return nil, connectError(t, cred.User, err, pw)
 	}
 	return &session{client: cl, hello: h, user: cred.User}, nil
 }
 
 // connectError explains a failed connection, scrubbed of the password.
-func connectError(t engine.Target, err error, pw secrets.Secret) error {
+func connectError(t engine.Target, user string, err error, pw secrets.Secret) error {
 	fact := "cannot connect to MongoDB"
-	if u := t.Config.Credentials.Backup.User; u != "" {
+	if u := user; u != "" {
 		fact += " as " + u
 	}
 	code := msg.ExitConnect

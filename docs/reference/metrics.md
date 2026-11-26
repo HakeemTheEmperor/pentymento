@@ -6,7 +6,7 @@ pentym exposes Prometheus metrics at `/metrics` on the agent's control socket an
 | --- | --- | --- | --- |
 | `pentym_capture_lag_seconds` | gauge | `target` | Seconds between the newest change in the database and the newest change captured |
 | `pentym_pg_slot_retained_wal_bytes` | gauge | `target` | Bytes of WAL the Postgres replication slot makes the server retain |
-| `pentym_mongo_oplog_window_seconds` | gauge | `target` | Seconds of history in the MongoDB oplog |
+| `pentym_mongo_oplog_window_seconds` | gauge | `target` | Seconds of history in the MongoDB oplog: how long capture can stop before entries are lost |
 | `pentym_pitr_window_seconds` | gauge | `target` | Length of the actual point-in-time recovery window, gaps included |
 | `pentym_last_success_timestamp_seconds` | gauge | `target`, `job` | Unix time of the last successful run of a job |
 | `pentym_job_duration_seconds` | histogram | `job` | Duration of jobs |
