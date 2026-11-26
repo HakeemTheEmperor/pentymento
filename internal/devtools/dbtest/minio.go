@@ -16,9 +16,12 @@ import (
 	tcminio "github.com/testcontainers/testcontainers-go/modules/minio"
 )
 
-// MinIOImage supports conditional writes (If-None-Match) on PUT and on
-// multipart completion; the module's default image predates them.
-const MinIOImage = "quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
+// MinIOImage is MinIO built from upstream source by Chainguard, pinned by
+// digest. MinIO no longer publishes images (the minio/minio repositories
+// on Docker Hub and quay.io are gone), and the module's default image
+// predates conditional writes (If-None-Match). Chainguard's free images
+// carry only a moving latest tag, so this pins the build of 2026-11-26.
+const MinIOImage = "cgr.dev/chainguard/minio@sha256:b9b1cce81a4a6cc9bf250e68d621cc0b9fb8ed15aefe18fcd1840525eab6a81a"
 
 // MinIO is a running MinIO server with one empty bucket.
 type MinIO struct {
@@ -35,7 +38,10 @@ func StartMinIO(t testing.TB) *MinIO {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
-	c, err := tcminio.Run(ctx, MinIOImage, tcminio.WithUsername("pentym"), tcminio.WithPassword(randomPassword(t)))
+	// The image runs as a non-root user, so the data goes under /tmp,
+	// which it can write, rather than the module's /data.
+	c, err := tcminio.Run(ctx, MinIOImage, tcminio.WithUsername("pentym"), tcminio.WithPassword(randomPassword(t)),
+		testcontainers.WithCmd("server", "/tmp/minio"))
 	testcontainers.CleanupContainer(t, c)
 	if err != nil {
 		t.Fatalf("start MinIO: %v", err)
