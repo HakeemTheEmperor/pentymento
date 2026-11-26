@@ -84,6 +84,11 @@ func (e *Engine) connect(ctx context.Context, t engine.Target, replication bool)
 	if err != nil {
 		return nil, err
 	}
+	return e.connectAs(ctx, t, cred, replication)
+}
+
+// connectAs opens a connection as a given role.
+func (e *Engine) connectAs(ctx context.Context, t engine.Target, cred config.Credential, replication bool) (*pgconn.PgConn, error) {
 	db := t.Config.Database
 	if db == "" {
 		db = "postgres"
@@ -108,17 +113,17 @@ func (e *Engine) connect(ctx context.Context, t engine.Target, replication bool)
 	}
 	conn, err := pgconn.ConnectConfig(ctx, cfg)
 	if err != nil {
-		return nil, connectError(t, replication, err, pw)
+		return nil, connectError(t, cred.User, replication, err, pw)
 	}
 	return conn, nil
 }
 
 // connectError explains a failed connection, scrubbed of the password.
-func connectError(t engine.Target, replication bool, err error, pw secrets.Secret) error {
+func connectError(t engine.Target, user string, replication bool, err error, pw secrets.Secret) error {
 	cause := secrets.Scrub(err.Error(), pw)
 	m := msg.Message{
 		Level: msg.LevelFailed, ID: IDConnect, Target: t.Name,
-		Fact:  "cannot connect to Postgres as " + t.Config.Credentials.Backup.User,
+		Fact:  "cannot connect to Postgres as " + user,
 		Cause: cause,
 		Next:  "check the host, port, role and password of target " + t.Name + ", then run pentym doctor " + t.Name,
 	}
@@ -127,7 +132,7 @@ func connectError(t engine.Target, replication bool, err error, pw secrets.Secre
 	if errors.As(err, &pgErr) {
 		switch {
 		case pgErr.Code == "28000" && replication:
-			m.ID, m.Fact = IDReplicationHBA, "the server refuses replication connections from "+t.Config.Credentials.Backup.User
+			m.ID, m.Fact = IDReplicationHBA, "the server refuses replication connections from "+user
 			m.Impact = "base backups use a replication connection"
 			m.Next = "allow it in pg_hba.conf with a line for the replication database, then reload Postgres"
 			code = msg.ExitAccess

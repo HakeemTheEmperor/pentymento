@@ -93,3 +93,48 @@ func TestMongoDBTargetInvalid(t *testing.T) {
 		}
 	}
 }
+
+func TestCaptureSettings(t *testing.T) {
+	dir := files(t, map[string]string{"config.yaml": `
+targets:
+  prod-pg:
+    engine: postgres
+    slot: pentym_main
+    credentials:
+      backup:
+        user: pentym_backup
+      replication:
+        user: pentym_repl
+        password: env:PG_REPL_PW
+  other-pg:
+    engine: postgres
+    credentials:
+      backup:
+        user: pentym_backup
+`})
+	c, err := Load(filepath.Join(dir, "config.yaml"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pg, other := c.Targets["prod-pg"], c.Targets["other-pg"]
+	if pg.SlotName("prod-pg") != "pentym_main" || other.SlotName("other-pg") != "pentym_other_pg" {
+		t.Errorf("slots = %q, %q", pg.SlotName("prod-pg"), other.SlotName("other-pg"))
+	}
+	if cc := pg.Credentials.CaptureCredential(); cc.User != "pentym_repl" || cc.Password.String() != "env:PG_REPL_PW" {
+		t.Errorf("capture credential = %+v", cc)
+	}
+	if cc := other.Credentials.CaptureCredential(); cc.User != "pentym_backup" {
+		t.Errorf("capture falls back to %+v", cc)
+	}
+	if got := DefaultSlot(strings.Repeat("a", 80)); len(got) != 63 {
+		t.Errorf("a long default slot is %d characters", len(got))
+	}
+	for _, tt := range []struct{ engine, yaml, want string }{
+		{"postgres", "slot: Pentym-Slot", `target t: slot must be 1-63 lowercase letters, digits and underscores, not "Pentym-Slot"`},
+		{"mongodb", "slot: s1", "target t: slot is for postgres targets; a mongodb target sets its connection in uri"},
+	} {
+		dir := files(t, map[string]string{"config.yaml": "targets:\n  t:\n    engine: " + tt.engine + "\n    " + tt.yaml + "\n"})
+		_, err := Load(filepath.Join(dir, "config.yaml"), nil)
+		wantConfigError(t, err, IDInvalid, tt.want)
+	}
+}

@@ -10,7 +10,7 @@ pentym exposes Prometheus metrics at `/metrics` on the agent's control socket an
 | `pentym_pitr_window_seconds` | gauge | `target` | Length of the actual point-in-time recovery window, gaps included |
 | `pentym_last_success_timestamp_seconds` | gauge | `target`, `job` | Unix time of the last successful run of a job |
 | `pentym_job_duration_seconds` | histogram | `job` | Duration of jobs |
-| `pentym_job_failures_total` | counter | `target`, `job` | Failed job runs |
+| `pentym_job_failures_total` | counter | `target`, `job` | Failed job runs; `job="capture"` counts capture failures and gaps |
 | `pentym_repo_bytes` | gauge | `kind` | Bytes stored in the repository, by kind |
 | `pentym_dedup_ratio` | gauge | — | Logical snapshot bytes per byte stored after deduplication |
 | `pentym_backend_request_duration_seconds` | histogram | `op` | Duration of storage backend requests |

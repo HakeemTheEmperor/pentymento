@@ -209,6 +209,10 @@ type Target struct {
 	SSLCert     string `yaml:"sslcert"`
 	SSLKey      string `yaml:"sslkey"`
 
+	// Slot is a Postgres target's physical replication slot for WAL
+	// capture; empty means DefaultSlot.
+	Slot string `yaml:"slot"`
+
 	// URI is a MongoDB target's connection string, such as
 	// mongodb://db1:27017,db2:27017/?replicaSet=rs0&tls=true. It holds no
 	// user name or password: those come from Credentials. Empty means
@@ -220,11 +224,23 @@ type Target struct {
 	Credentials Credentials `yaml:"credentials"`
 }
 
-// Credentials are a target's roles by purpose. Replication (capture) and
-// restore credentials are added by the chunks that use them.
+// Credentials are a target's roles by purpose. The restore credential is
+// added by the chunk that uses it.
 type Credentials struct {
 	// Backup takes base backups.
 	Backup Credential `yaml:"backup"`
+	// Replication captures the log (Postgres WAL through the replication
+	// slot); when its user is empty, capture uses Backup.
+	Replication Credential `yaml:"replication"`
+}
+
+// CaptureCredential is the credential log capture connects with: the
+// replication credential, or the backup credential when none is set.
+func (c Credentials) CaptureCredential() Credential {
+	if c.Replication.User != "" {
+		return c.Replication
+	}
+	return c.Backup
 }
 
 // Credential is a role and, optionally, a reference to its password;
@@ -372,7 +388,7 @@ func contains(list []string, s string) bool {
 // use uri.
 func (t Target) validateConnection(name string) error {
 	if t.Engine == "mongodb" {
-		for _, f := range [][2]string{{"host", t.Host}, {"database", t.Database}, {"sslmode", t.SSLMode},
+		for _, f := range [][2]string{{"host", t.Host}, {"database", t.Database}, {"sslmode", t.SSLMode}, {"slot", t.Slot},
 			{"sslrootcert", t.SSLRootCert}, {"sslcert", t.SSLCert}, {"sslkey", t.SSLKey}} {
 			if f[1] != "" {
 				return fmt.Errorf("target %s: %s is for postgres targets; a mongodb target sets its connection in uri", name, f[0])
@@ -388,6 +404,9 @@ func (t Target) validateConnection(name string) error {
 	}
 	if t.Port < 0 || t.Port > 65535 {
 		return fmt.Errorf("target %s: port %d is not a TCP port", name, t.Port)
+	}
+	if t.Slot != "" && !slotRE.MatchString(t.Slot) {
+		return fmt.Errorf("target %s: slot must be 1-63 lowercase letters, digits and underscores, not %q", name, t.Slot)
 	}
 	if t.SSLMode != "" && !contains(SSLModes, t.SSLMode) {
 		return fmt.Errorf("target %s: sslmode must be one of %s, not %q", name, strings.Join(SSLModes, ", "), t.SSLMode)
@@ -497,4 +516,25 @@ func (a Agent) validate() error {
 		}
 	}
 	return nil
+}
+
+// slotRE is the form of a Postgres replication slot name.
+var slotRE = regexp.MustCompile(`^[a-z0-9_]{1,63}$`)
+
+// DefaultSlot is a Postgres target's replication slot when none is set:
+// pentym_ and the target name with - turned into _.
+func DefaultSlot(target string) string {
+	s := "pentym_" + strings.ReplaceAll(target, "-", "_")
+	if len(s) > 63 {
+		s = s[:63]
+	}
+	return s
+}
+
+// SlotName returns the target's replication slot.
+func (t Target) SlotName(name string) string {
+	if t.Slot != "" {
+		return t.Slot
+	}
+	return DefaultSlot(name)
 }

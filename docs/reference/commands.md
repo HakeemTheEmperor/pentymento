@@ -199,7 +199,26 @@ It can be read with curl: `curl --unix-socket <work_dir>/agent.sock http://agent
 
 Commands that use the socket fall back to the repository when no agent answers: they say "agent not reachable" with the newest heartbeat (when `repository.key` lets them read it without asking for a passphrase) and exit with code 5. Whether an agent is alive is judged from its heartbeat and lease in the repository, never from the socket.
 
-Logs go to stdout: JSON for services, text in a terminal (`--log-format` overrides). Continuous capture of WAL and oplog is added by later chunks; until then the agent holds leases and heartbeats without capturing.
+Logs go to stdout: JSON for services, text in a terminal (`--log-format` overrides).
+
+### WAL capture (Postgres)
+
+While the agent holds a Postgres target's lease, it streams the target's WAL from a physical replication slot (`targets.<name>.slot`, default `pentym_<target>`), connecting as `credentials.replication` or, without it, `credentials.backup`. It creates the slot if it does not exist.
+
+- Each completed WAL segment is stored as its own object as it fills; the segment in progress is stored every 10 seconds while new WAL arrives, and once more when the agent stops (as a `.partial`), so the recovery point is seconds.
+- After each stored piece the agent writes a checkpoint carrying its lease generation, and only then tells Postgres the WAL is stored, so the slot frees only WAL that is safe in the repository. A restarted agent, after a crash or `kill -9`, resumes from the checkpoint; WAL stored twice is harmless.
+- Timeline switches (after a failover) are followed, and each timeline's history file is stored.
+- **Gaps.** If the WAL since the checkpoint can no longer be streamed (the slot was dropped or invalidated by `max_slot_wal_keep_size`, or the server removed the WAL), the agent records a gap in the repository and the journal, logs an error, counts it in `pentym_job_failures_total{job="capture"}`, and takes a base backup so recovery starts again after the gap. An invalidated slot is replaced; a slot that still holds WAL is never dropped.
+- When capture starts with no checkpoint at all, the agent takes a base backup, once, so that recovery can start from captured WAL.
+- **Monitoring.** Every 30 seconds the agent checks how much WAL the slot makes the server keep, and how far capture lags, and publishes `pentym_pg_slot_retained_wal_bytes` and `pentym_capture_lag_seconds`. It logs a warning or an error when a condition crosses a threshold, and again when it clears:
+
+| Condition | Warning | Critical |
+| --- | --- | --- |
+| Capture lag | 5 min | 15 min |
+| Retained WAL, `max_slot_wal_keep_size` set | 50% of it | 80% of it |
+| Retained WAL, no limit set | 10 GB | 50 GB, with the advice to set `max_slot_wal_keep_size` |
+
+A slot keeps WAL until the agent stores it, so a stopped agent makes the server keep WAL until it returns. Set `max_slot_wal_keep_size` so a long outage cannot fill the server's disk; the slot is then invalidated instead, which the agent reports as a gap. Alert delivery (webhooks, Slack) and configurable thresholds come with notifications; MongoDB capture comes with oplog tailing.
 
 ## `pentym agent reload`
 

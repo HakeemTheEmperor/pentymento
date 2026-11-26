@@ -149,6 +149,45 @@ func (r *Repository) LatestHeartbeats(ctx context.Context) ([]Heartbeat, error) 
 	return out, nil
 }
 
+// Gap is a stretch of a target's log that capture could not store: the
+// replication slot was invalidated or dropped, the WAL was removed, or
+// the oplog rolled over (PRD 7.3). Point-in-time recovery cannot reach a
+// time inside it; a base backup taken after it starts coverage again.
+type Gap struct {
+	Target string `json:"target"`
+	// From is the last position stored before the gap; To is where
+	// capture could resume. Either may be empty when unknown.
+	From   string    `json:"from,omitempty"`
+	To     string    `json:"to,omitempty"`
+	Reason string    `json:"reason"`
+	Time   time.Time `json:"time"`
+	// Generation is the capture lease generation of the agent that found
+	// it.
+	Generation uint64 `json:"generation,omitempty"`
+}
+
+// PutGap records a gap.
+func (r *Repository) PutGap(ctx context.Context, g Gap) error {
+	return r.putMeta(ctx, gapKey(g.Target, g.Time), g, backend.PutOptions{IfNotExists: true})
+}
+
+// Gaps returns a target's gaps, oldest first.
+func (r *Repository) Gaps(ctx context.Context, tid string) ([]Gap, error) {
+	keys, err := r.listKeys(ctx, gapPrefix(tid))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Gap, 0, len(keys))
+	for _, k := range keys {
+		var g Gap
+		if err := r.getMeta(ctx, k, &g); err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, nil
+}
+
 // Event is a detected destructive operation (SDD 5.2, 6.3).
 type Event struct {
 	Target string `json:"target"`

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"regexp"
 	"strings"
@@ -235,4 +236,22 @@ func TestListCommand(t *testing.T) {
 		doc.Snapshots[0].PinReason != "pre-migration" || doc.Snapshots[1].Pinned || doc.Snapshots[0].Size != 2200002 {
 		t.Errorf("--json = %s", res.stdout)
 	}
+}
+
+// The fake engines capture nothing, as an engine that does not capture
+// yet: the agent holds their leases without capturing.
+func (cliFakeEngine) DetectGap(context.Context, engine.Target, engine.Position) (*engine.Gap, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (cliFakeEngine) Capture(context.Context, engine.Target, engine.Position, engine.LogSink) error {
+	return errors.ErrUnsupported
+}
+
+func (cliMongoFake) DetectGap(context.Context, engine.Target, engine.Position) (*engine.Gap, error) {
+	return nil, errors.ErrUnsupported
+}
+
+func (cliMongoFake) Capture(context.Context, engine.Target, engine.Position, engine.LogSink) error {
+	return errors.ErrUnsupported
 }

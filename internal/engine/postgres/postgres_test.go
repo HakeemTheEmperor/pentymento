@@ -121,7 +121,7 @@ func TestConnectError(t *testing.T) {
 		{errors.New("dial tcp: connection refused (password hunter2-secret)"), false, IDConnect, msg.ExitConnect},
 	} {
 		var me *msg.Error
-		err := connectError(tg, tt.replication, tt.err, pw)
+		err := connectError(tg, "pentym_backup", tt.replication, tt.err, pw)
 		if !errors.As(err, &me) || me.Message.ID != tt.id || me.Code != tt.code || me.Message.Next == "" {
 			t.Errorf("connectError(%v) = %+v", tt.err, me)
 		}

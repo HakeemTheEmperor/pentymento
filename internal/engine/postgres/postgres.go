@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/engine"
@@ -19,7 +20,7 @@ import (
 var Versions = []string{"16", "17", "18"}
 
 // errNotYet is returned by the parts of the engine later chunks build.
-var errNotYet = errors.New("not implemented in this build")
+var errNotYet = fmt.Errorf("not implemented in this build: %w", errors.ErrUnsupported)
 
 // Engine is the Postgres engine (SDD 4.2).
 type Engine struct {
@@ -36,6 +37,8 @@ type Engine struct {
 	Logger *slog.Logger
 	// RunID tags child processes' logs.
 	RunID string
+	// Observer, if set, receives captured WAL as it arrives.
+	Observer WALObserver
 }
 
 var _ engine.Engine = (*Engine)(nil)
@@ -63,16 +66,6 @@ func (e *Engine) logger() *slog.Logger {
 		return e.Logger
 	}
 	return slog.New(slog.DiscardHandler)
-}
-
-// Capture comes with the agent (C17).
-func (*Engine) Capture(context.Context, engine.Target, engine.Position, engine.LogSink) error {
-	return errNotYet
-}
-
-// DetectGap comes with the agent (C17).
-func (*Engine) DetectGap(context.Context, engine.Target, engine.Position) (*engine.Gap, error) {
-	return nil, errNotYet
 }
 
 // Extract comes with restores (C16).

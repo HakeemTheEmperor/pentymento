@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/engine"
@@ -26,7 +27,7 @@ const Method = "mongodump"
 const ArchiveName = "mongodump.archive"
 
 // errNotYet is returned by the parts of the engine later chunks build.
-var errNotYet = errors.New("not implemented in this build")
+var errNotYet = fmt.Errorf("not implemented in this build: %w", errors.ErrUnsupported)
 
 // Engine is the MongoDB engine (SDD 4.2).
 type Engine struct {
@@ -78,6 +79,11 @@ func (*Engine) Capture(context.Context, engine.Target, engine.Position, engine.L
 
 // DetectGap comes with the agent.
 func (*Engine) DetectGap(context.Context, engine.Target, engine.Position) (*engine.Gap, error) {
+	return nil, errNotYet
+}
+
+// LogHealth comes with oplog capture.
+func (*Engine) LogHealth(context.Context, engine.Target) (*engine.LogHealth, error) {
 	return nil, errNotYet
 }
 
