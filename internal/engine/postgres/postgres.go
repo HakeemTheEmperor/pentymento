@@ -75,11 +75,6 @@ func (*Engine) DetectGap(context.Context, engine.Target, engine.Position) (*engi
 	return nil, errNotYet
 }
 
-// Restore comes with restores (C16).
-func (*Engine) Restore(context.Context, engine.RestoreRequest, engine.StartFunc) (instance.Instance, *engine.Reached, error) {
-	return nil, nil, errNotYet
-}
-
 // Extract comes with restores (C16).
 func (*Engine) Extract(context.Context, instance.Instance, engine.Target, engine.ExtractRequest) error {
 	return errNotYet

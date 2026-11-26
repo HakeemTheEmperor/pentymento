@@ -46,9 +46,16 @@ func fakeMongodump(mode string) {
 			conf, _ = os.ReadFile(p) // #nosec G304 G703 -- test fake
 		}
 	}
-	b, _ := json.Marshal(map[string]any{"args": os.Args[1:], "env": os.Environ(), "config": string(conf)})
+	var stdin []byte
+	if strings.HasPrefix(mode, "restore") {
+		stdin, _ = io.ReadAll(os.Stdin)
+	}
+	b, _ := json.Marshal(map[string]any{"args": os.Args[1:], "env": os.Environ(), "config": string(conf), "stdin": stdin})
 	_ = os.WriteFile(os.Getenv("PENTYM_MONGODUMP_FAKE_LOG"), b, 0o600) // #nosec G703 -- test fake
 	switch mode {
+	case "restore-fail":
+		fmt.Fprintln(os.Stderr, "Failed: app.orders: error restoring from archive: E11000 duplicate key")
+		os.Exit(1)
 	case "version":
 		fmt.Println("mongodump version: 100.10.0")
 	case "legacy":
@@ -90,8 +97,10 @@ func fakeEngine(t *testing.T, mode string, env map[string]string) (*Engine, stri
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, toolrun.ExeName("mongodump")), b, 0o700); err != nil { // #nosec G306 G703 -- an executable
-		t.Fatal(err)
+	for _, tool := range []string{"mongodump", "mongorestore"} {
+		if err := os.WriteFile(filepath.Join(dir, toolrun.ExeName(tool)), b, 0o700); err != nil { // #nosec G306 G703 -- an executable
+			t.Fatal(err)
+		}
 	}
 	log := filepath.Join(t.TempDir(), "log.json")
 	r := &toolrun.Runner{
@@ -118,6 +127,7 @@ type fakeRecord struct {
 	Args   []string `json:"args"`
 	Env    []string `json:"env"`
 	Config string   `json:"config"`
+	Stdin  []byte   `json:"stdin"`
 }
 
 func readRecord(t *testing.T, log string) fakeRecord {

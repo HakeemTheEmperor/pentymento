@@ -160,17 +160,32 @@ type LogSource interface {
 	Segment(ctx context.Context, name string) ([]byte, error)
 }
 
-// StartFunc starts a side instance over a prepared data directory, through
-// the configured instance providers.
-type StartFunc func(ctx context.Context, dataDir string) (instance.Instance, error)
+// StartFunc starts a side instance of the engine's version (a Postgres
+// major version such as "17", a MongoDB release such as "8.0") over a
+// data directory, through the configured instance providers. An empty
+// directory gets a fresh server; one the engine filled is used as it is.
+type StartFunc func(ctx context.Context, version, dataDir string) (instance.Instance, error)
+
+// ArchiveSource reads a snapshot's archives back, decrypted, in the
+// order the engine wrote them.
+type ArchiveSource interface {
+	// Names lists the archives in order.
+	Names() []string
+	// Archive writes one archive to w.
+	Archive(ctx context.Context, name string, w io.Writer) error
+}
 
 // RestoreRequest asks for a side instance at a point.
 type RestoreRequest struct {
-	// Snapshot is the base backup's stream; Backup describes it.
-	Snapshot io.Reader
+	// Target is the configured target the snapshot was taken from.
+	Target Target
+	// Archives are the snapshot's archives; Backup describes them.
+	Archives ArchiveSource
 	Backup   BaseBackup
-	Logs     LogSource
-	Target   Point
+	// Logs and Point are for replay to a point, which later chunks add;
+	// a zero Point restores the snapshot as it is.
+	Logs  LogSource
+	Point Point
 	// DataDir is an empty directory for the instance's data.
 	DataDir string
 }
@@ -208,12 +223,14 @@ type Engine interface {
 	// DetectGap reports whether the log since a checkpoint can still be
 	// captured; nil means it can.
 	DetectGap(ctx context.Context, t Target, checkpoint Position) (*Gap, error)
-	// Restore brings up a side instance at req.Target, calling start when
-	// the data directory is ready (Postgres) or first (MongoDB).
+	// Restore brings up a side instance with the snapshot restored (and,
+	// later, replayed to req.Point), calling start when the data directory
+	// is ready (Postgres) or first (MongoDB). The instance's Conn logs in
+	// as a superuser of the side instance; the caller stops it.
 	Restore(ctx context.Context, req RestoreRequest, start StartFunc) (instance.Instance, *Reached, error)
 	// Extract copies objects from a side instance into the target.
 	Extract(ctx context.Context, from instance.Instance, to Target, req ExtractRequest) error
-	// Rewind restores the whole target to req.Target (opt-in, destructive).
+	// Rewind restores the whole target to req.Point (opt-in, destructive).
 	Rewind(ctx context.Context, t Target, req RestoreRequest, start StartFunc) error
 	// Inventory summarizes a server's contents for the snapshot record.
 	Inventory(ctx context.Context, t Target) (json.RawMessage, error)
