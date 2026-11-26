@@ -76,6 +76,7 @@ var entries = []Entry{
 	{ID: "PTM-4004", Name: "no-unlock-secret"},
 	{ID: "PTM-4005", Name: "too-few-key-slots"},
 	{ID: "PTM-4006", Name: "one-full-key-slot"},
+	{ID: "PTM-4007", Name: "agent-slot-can-read"},
 	{ID: "PTM-6001", Name: "no-instance-provider"},
 	{ID: "PTM-7001", Name: "object-missing"},
 	{ID: "PTM-7002", Name: "object-corrupt"},

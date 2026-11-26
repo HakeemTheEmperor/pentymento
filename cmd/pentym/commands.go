@@ -57,7 +57,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root.AddCommand(
 		a.initCommand(),
 		a.backupCommand(),
-		agentCommand(),
+		a.agentCommand(),
 		catchUpCommand(),
 		restoreCommand(),
 		eventsCommand(),
@@ -122,25 +122,6 @@ func group(use, short string, ex ...string) *cobra.Command {
 			return newUsageError(cmd, fmt.Sprintf("%s needs a subcommand: %s", cmd.CommandPath(), strings.Join(names, ", ")))
 		},
 	}
-}
-
-func agentCommand() *cobra.Command {
-	c := stub("agent", "Run continuous capture and the scheduler", cobra.NoArgs,
-		"Run the agent in the foreground", "pentym agent",
-		"Install and start the agent as a service", "pentym agent install")
-	install := stub("install", "Install the agent as an operating-system service", args(),
-		"Install the agent service", "pentym agent install",
-		"Print the service files instead of installing", "pentym agent install --print")
-	install.Flags().Bool("print", false, "print the service files instead of installing them")
-	c.AddCommand(
-		install,
-		stub("uninstall", "Remove the agent service", args(), "Remove the agent service", "pentym agent uninstall"),
-		stub("start", "Start the agent service", args(), "Start the agent service", "pentym agent start"),
-		stub("stop", "Stop the agent service", args(), "Stop the agent service", "pentym agent stop"),
-		stub("reload", "Reload the running agent's configuration without dropping connections", args(),
-			"Reload the configuration", "pentym agent reload"),
-	)
-	return c
 }
 
 func catchUpCommand() *cobra.Command {

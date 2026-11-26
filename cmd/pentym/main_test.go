@@ -137,6 +137,8 @@ var implemented = map[string]bool{
 	"pentym key remove":         true,
 	"pentym key export":         true,
 	"pentym dump":               true,
+	"pentym agent":              true,
+	"pentym agent reload":       true,
 }
 
 func TestStubsAreNotImplemented(t *testing.T) {

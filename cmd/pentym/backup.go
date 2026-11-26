@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/HakeemTheEmperor/pentymento/internal/cliout"
 	"github.com/HakeemTheEmperor/pentymento/internal/config"
+	"github.com/HakeemTheEmperor/pentymento/internal/control"
 	"github.com/HakeemTheEmperor/pentymento/internal/engine"
 	"github.com/HakeemTheEmperor/pentymento/internal/instance"
 	"github.com/HakeemTheEmperor/pentymento/internal/msg"
@@ -65,17 +67,15 @@ func (a *app) backupCommand() *cobra.Command {
 		Long: "Take a base backup of a target and commit it as a snapshot. The backup streams straight into the repository: " +
 			"nothing is written to temporary files, and memory stays constant whatever the database's size. " +
 			"A snapshot is committed only if the backup finishes cleanly.\n\n" +
-			"It unlocks the repository with any key slot, an agent slot included, and holds a shared lock while it runs.",
+			"It unlocks the repository with any key slot, an agent slot included, and holds a shared lock while it runs. " +
+			"With --now the running agent takes the backup instead, with its own connection, key slot and lock.",
 		Example: example(
 			"Take a snapshot of prod-pg", "pentym backup prod-pg",
 			"Take it through the running agent", "pentym backup prod-pg --now"),
 		Args: args("<target>"),
 		RunE: func(cmd *cobra.Command, argv []string) error {
 			if now {
-				return &msg.Error{Code: msg.ExitNotImplemented, Message: msg.Message{
-					Level: msg.LevelFailed, Fact: "--now needs the agent, which is not implemented in this build",
-					Next: "pentym backup " + argv[0],
-				}}
+				return a.runBackupNow(cmd.Context(), argv[0])
 			}
 			return a.runBackup(cmd.Context(), argv[0], slot)
 		},
@@ -113,27 +113,81 @@ func (a *app) runBackup(ctx context.Context, name, slot string) error {
 	}
 	res, err := b.Run(ctx)
 	progress.Done()
-	for _, f := range res.Warnings {
-		a.printer.Message(msg.Message{Level: msg.LevelWarning, ID: f.ID, Target: name, Fact: f.Fact, Next: f.Next})
-	}
 	if err != nil {
+		for _, f := range res.Warnings {
+			a.printer.Message(msg.Message{Level: msg.LevelWarning, ID: f.ID, Target: name, Fact: f.Fact, Next: f.Next})
+		}
 		return err
 	}
-	s, st := res.Snapshot, res.Stats
-	if a.opts.json {
-		return a.printer.WriteJSON(struct {
-			Snapshot snapshotInfo `json:"snapshot"`
-			Stats    backupStats  `json:"stats"`
-		}{a.snapshotInfo(s, name, nil), backupStats{
-			Bytes: st.Bytes, NewBytes: st.NewBytes, Chunks: st.Chunks, NewChunks: st.NewChunks,
-			Packs: st.Packs, DedupRatio: st.DedupRatio(), DurationSeconds: res.Duration.Seconds(), RunID: res.RunID,
-		}})
+	return a.printBackup(name, a.backupReport(name, res))
+}
+
+// backupReport is what a backup reports: in --json, and from the agent
+// for backup --now.
+type backupReport struct {
+	Snapshot snapshotInfo     `json:"snapshot"`
+	Stats    backupStats      `json:"stats"`
+	Warnings []warningMessage `json:"warnings,omitempty"`
+}
+
+// warningMessage is a check's warning in a report.
+type warningMessage struct {
+	ID   string `json:"id,omitempty"`
+	Fact string `json:"message"`
+	Next string `json:"next,omitempty"`
+}
+
+func (a *app) backupReport(name string, res *ops.BackupResult) backupReport {
+	st := res.Stats
+	rep := backupReport{Snapshot: a.snapshotInfo(res.Snapshot, name, nil), Stats: backupStats{
+		Bytes: st.Bytes, NewBytes: st.NewBytes, Chunks: st.Chunks, NewChunks: st.NewChunks,
+		Packs: st.Packs, DedupRatio: st.DedupRatio(), DurationSeconds: res.Duration.Seconds(), RunID: res.RunID,
+	}}
+	for _, f := range res.Warnings {
+		rep.Warnings = append(rep.Warnings, warningMessage{ID: string(f.ID), Fact: f.Fact, Next: f.Next})
 	}
+	return rep
+}
+
+// printBackup prints a backup's report: the snapshot ID on stdout and a
+// summary on stderr, or the report as JSON.
+func (a *app) printBackup(name string, rep backupReport) error {
+	for _, w := range rep.Warnings {
+		a.printer.Message(msg.Message{Level: msg.LevelWarning, ID: msg.ID(w.ID), Target: name, Fact: w.Fact, Next: w.Next})
+	}
+	if a.opts.json {
+		return a.printer.WriteJSON(rep)
+	}
+	s := rep.Snapshot
 	_, _ = fmt.Fprintln(a.printer.Stdout, s.ID)
 	a.printer.Message(msg.Message{Level: msg.LevelOK, Target: name, Fact: fmt.Sprintf(
 		"snapshot %s: %s in %s, %s new after deduplication",
-		s.ID, cliout.Bytes(s.TotalSize()), cliout.Duration(res.Duration), cliout.Bytes(st.NewBytes))})
+		s.ID, cliout.Bytes(s.Size), cliout.Duration(time.Duration(rep.Stats.DurationSeconds*float64(time.Second))), cliout.Bytes(rep.Stats.NewBytes))})
 	return nil
+}
+
+// runBackupNow asks the running agent to take the backup, through its
+// control socket.
+func (a *app) runBackupNow(ctx context.Context, name string) error {
+	cfg, err := a.repoConfig()
+	if err != nil {
+		return err
+	}
+	if _, err := configTarget(cfg, name); err != nil {
+		return err
+	}
+	sock, err := cfg.AgentSocket()
+	if err != nil {
+		return err
+	}
+	var rep backupReport
+	if err := control.NewClient(sock).Backup(ctx, name, &rep); err != nil {
+		if errors.Is(err, control.ErrUnreachable) {
+			return a.agentUnreachable(ctx, cfg, sock, err, "pentym backup "+name+" (without --now) takes it here")
+		}
+		return err
+	}
+	return a.printBackup(name, rep)
 }
 
 // backupStats is what a backup wrote, in --json.

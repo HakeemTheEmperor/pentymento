@@ -50,6 +50,7 @@ IDs are permanent: an ID is never reused and never changes meaning.
 | [PTM-4004](PTM-4004.md) | no-unlock-secret |
 | [PTM-4005](PTM-4005.md) | too-few-key-slots |
 | [PTM-4006](PTM-4006.md) | one-full-key-slot |
+| [PTM-4007](PTM-4007.md) | agent-slot-can-read |
 | [PTM-6001](PTM-6001.md) | no-instance-provider |
 | [PTM-7001](PTM-7001.md) | object-missing |
 | [PTM-7002](PTM-7002.md) | object-corrupt |

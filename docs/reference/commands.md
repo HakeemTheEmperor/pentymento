@@ -1,6 +1,6 @@
 # Commands
 
-Every command has `--help` with examples, prints its result on stdout (as JSON with `--json`), and exits with a stable [exit code](exit-codes.md). This page covers the commands that are built so far: `init`, `key`, `check`, `repo`, `doctor`, `backup`, `list` and `dump`.
+Every command has `--help` with examples, prints its result on stdout (as JSON with `--json`), and exits with a stable [exit code](exit-codes.md). This page covers the commands that are built so far: `init`, `key`, `check`, `repo`, `doctor`, `backup`, `list`, `dump`, `agent` and `agent reload`.
 
 Secrets never go on the command line. Flags that take a passphrase take a [secret reference](config.md#secrets) such as `env:NAME` or `file:/path`, and refuse a plain value. In a terminal, pentym asks for passphrases instead, without echoing them.
 
@@ -135,7 +135,7 @@ For Postgres, the backup uses `BASE_BACKUP` over a replication connection, falli
 
 For MongoDB, the backup runs `mongodump --archive` from the [Database Tools](../tools.md#mongodb-snapshots-with-mongodump) and stores the archive as one stream, `mongodump.archive`. On a replica set it adds `--oplog`, so the snapshot restores to one consistent point, and records the first and last oplog timestamps it holds as its log positions. A standalone server has no oplog: its snapshots are taken without one, record no positions, and allow no point-in-time recovery, which the backup reports as a warning ([PTM-2011](../errors/PTM-2011.md)). Sharded clusters are refused.
 
-It unlocks the repository with any key slot; an agent slot is enough. It prints the snapshot ID on stdout, and with `--json` the snapshot and what the backup stored. `--now`, which runs the backup through the agent, is not built yet.
+It unlocks the repository with any key slot; an agent slot is enough. It prints the snapshot ID on stdout, and with `--json` the snapshot and what the backup stored. With `--now` the running agent takes the backup instead, through its control socket, with its own connection, key slot and lock; the result is printed the same way. If no agent answers, it says so with the last heartbeat in the repository and exits with code 5; run it without `--now` to take the backup here.
 
 ## `pentym list`
 
@@ -163,3 +163,44 @@ pentym dump 9b1e0c4f7a2d48e6b3c5f1a8d0e7c2b4 | mongorestore --archive --oplogRep
 Without `--output` the dump goes to stdout, which must not be a terminal; `--json` then has nowhere to go, so it needs `--output`. The snapshot ID is the full ID that `pentym list` shows. The dump streams with constant memory, reading chunks in parallel ahead of the writer, and checks every chunk against its ID; it needs a full key slot and is recorded in the journal.
 
 To restore a Postgres dump by hand, unpack it, then restore the archives as you would a tar-format `pg_basebackup`: `base.tar` into an empty data directory and each `<oid>.tar` into its tablespace's directory. The snapshot includes the WAL it needs, which Postgres replays when it starts.
+
+## `pentym agent`
+
+Runs the agent in the foreground until it is stopped with Ctrl-C or `SIGTERM` (SDD 9). `pentym agent install` and the other service commands are not built yet.
+
+On start it:
+
+1. opens the repository, refusing a newer format, and unlocks it with `repository.key`; with `agent.write_only` on (the default) it refuses a key slot that can read backups ([PTM-4007](../errors/PTM-4007.md));
+2. removes what a crashed run on this machine left behind: side instances and temporary credential files;
+3. writes a heartbeat to the repository, then one every 30 seconds;
+4. runs a lease loop for every configured target. Exactly one agent captures each target: it holds the target's capture lease, renewing it every 30 seconds, while other agents check it every 15 seconds. If the holder cannot renew for 90 seconds it stops capturing; another agent takes over only after the lease has stood unchanged for 2 minutes, so two agents never capture at once.
+
+On a graceful stop it finishes within 30 seconds: it stops capture, releases its leases, so a standby takes over at once, and writes a final heartbeat with `state: stopped`. After a crash, the lease expires after 2 minutes and a standby takes over.
+
+`pentym agent reload`, or `SIGHUP` on Linux and macOS, reloads the configuration: new targets start, removed ones stop and release their leases, changed ones restart, and targets whose settings did not change keep running. A reload cannot switch repositories.
+
+### Control socket
+
+The agent serves JSON over HTTP on a local socket (`agent.socket`; by default `<work_dir>/agent.sock`, or a named pipe on Windows), never on the network. On Linux and macOS it is a Unix socket readable only by the agent's user; on Windows the pipe admits only the agent's user, Administrators and SYSTEM. A socket left by a crashed agent is replaced; a second agent on a live socket is refused.
+
+| Request | Answer |
+| --- | --- |
+| `GET /v1/status` | Live state: the agent's ID and host, its last heartbeat, the upload queue depth, and per target whether it holds the lease, with the generation |
+| `POST /v1/reload` | Reloads the configuration, as `pentym agent reload` does |
+| `POST /v1/backup?target=<name>` | Takes a backup now, as `pentym backup <target> --now` does |
+| `GET /health` | 200 while the process runs |
+| `GET /ready` | 200 once the agent has started and until it begins to stop; 503 otherwise |
+| `GET /metrics` | Prometheus metrics |
+| `/debug/pprof/` | Go profiling, only with `agent.debug.pprof: true` |
+
+It can be read with curl: `curl --unix-socket <work_dir>/agent.sock http://agent/v1/status`.
+
+`agent.health_listen` opens an extra TCP port serving only `/health`, `/ready` and `/metrics`, for probes and Prometheus; no control request is ever reachable over the network.
+
+Commands that use the socket fall back to the repository when no agent answers: they say "agent not reachable" with the newest heartbeat (when `repository.key` lets them read it without asking for a passphrase) and exit with code 5. Whether an agent is alive is judged from its heartbeat and lease in the repository, never from the socket.
+
+Logs go to stdout: JSON for services, text in a terminal (`--log-format` overrides). Continuous capture of WAL and oplog is added by later chunks; until then the agent holds leases and heartbeats without capturing.
+
+## `pentym agent reload`
+
+Asks the running agent to reload its configuration through the control socket, and prints what changed: targets added, removed, restarted and unchanged (`--json` for the lists). Without a running agent it exits with code 5.
