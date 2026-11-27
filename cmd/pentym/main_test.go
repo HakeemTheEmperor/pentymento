@@ -139,6 +139,7 @@ var implemented = map[string]bool{
 	"pentym dump":               true,
 	"pentym agent":              true,
 	"pentym agent reload":       true,
+	"pentym catch-up":           true,
 }
 
 func TestStubsAreNotImplemented(t *testing.T) {

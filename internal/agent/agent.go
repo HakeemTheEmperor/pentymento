@@ -143,6 +143,11 @@ func New(o Options) (*Agent, error) {
 			Next:   "set repository.key to an agent slot (pentym key add --agent), or set agent.write_only: false",
 		}}
 	}
+	return newAgent(o)
+}
+
+// newAgent prepares an agent, or catch-up, without the write-only check.
+func newAgent(o Options) (*Agent, error) {
 	if o.Telemetry == nil {
 		o.Telemetry = telemetry.New(nil, nil)
 	}

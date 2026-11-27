@@ -47,6 +47,8 @@ Unknown keys are rejected with the file and line, so a misspelt key never passes
 | `agent.socket` | The agent's control socket: an absolute path, or a Windows named pipe; default `<work_dir>/agent.sock`, and `\\.\pipe\pentym-agent` on Windows |
 | `agent.health_listen` | `host:port` for the opt-in TCP health port, which serves only `/health`, `/ready` and `/metrics`; off when empty. It always names an address, such as `127.0.0.1` or the pod IP |
 | `agent.debug.pprof` | Serve Go's profiling endpoints on the control socket; default `false` |
+| `retention.pitr_window` | How far back point-in-time recovery must reach, such as `7d`, `36h` or `1d12h`; default `7d`. `pentym status` shows it beside the window actually covered |
+| `catch_up.auto` | Let `pentym status` run catch-up itself for a target whose capture lease has expired; default `false`, when status prints the `pentym catch-up` command instead |
 
 A target name is lowercase letters, digits, `-` and `_`, starts with a letter or digit, and is at most 63 characters. Two names that differ only in `-` and `_` are not allowed, because environment overrides cannot tell them apart.
 

@@ -41,6 +41,10 @@ type Config struct {
 	Targets map[string]Target `yaml:"targets"`
 	// Agent configures pentym agent.
 	Agent Agent `yaml:"agent"`
+	// Retention configures what the repository keeps.
+	Retention Retention `yaml:"retention"`
+	// CatchUp configures catch-up.
+	CatchUp CatchUp `yaml:"catch_up"`
 }
 
 // Agent configures the long-running agent (SDD 9).

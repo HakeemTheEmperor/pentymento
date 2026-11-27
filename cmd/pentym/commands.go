@@ -58,7 +58,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.initCommand(),
 		a.backupCommand(),
 		a.agentCommand(),
-		catchUpCommand(),
+		a.catchUpCommand(),
 		restoreCommand(),
 		eventsCommand(),
 		a.listCommand(),
@@ -122,11 +122,6 @@ func group(use, short string, ex ...string) *cobra.Command {
 			return newUsageError(cmd, fmt.Sprintf("%s needs a subcommand: %s", cmd.CommandPath(), strings.Join(names, ", ")))
 		},
 	}
-}
-
-func catchUpCommand() *cobra.Command {
-	return stub("catch-up <target>", "Upload the WAL or oplog retained while the agent was down", args("<target>"),
-		"Catch up prod-mg after agent downtime", "pentym catch-up prod-mg")
 }
 
 func restoreCommand() *cobra.Command {

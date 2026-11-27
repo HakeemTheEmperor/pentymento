@@ -82,6 +82,7 @@ func (a *Agent) captureFor(ctx context.Context, t Target) error {
 		}
 		if gap != nil {
 			a.recordGap(ctx, t, gap, log)
+			a.forceBackup(t, log, "a capture gap: "+gap.Reason)
 			from = "" // capture starts again where the server stands
 		} else if from == "" && a.firstStart(t.Name) {
 			// Nothing captured can be replayed onto the snapshots taken
@@ -118,8 +119,8 @@ func (a *Agent) notCapturing(ctx context.Context, log *slog.Logger, err error) e
 	return nil
 }
 
-// recordGap records a gap in the repository and the journal, and forces a
-// base backup so recovery starts again after it (PRD 7.3).
+// recordGap records a gap in the repository and the journal (PRD 7.3);
+// the caller forces a base backup, or recommends one.
 func (a *Agent) recordGap(ctx context.Context, t Target, gap *engine.Gap, log *slog.Logger) {
 	log.Error("capture gap: the log since the checkpoint cannot be captured; point-in-time recovery cannot reach inside it",
 		"from", gap.From, "to", gap.To, "reason", gap.Reason)
@@ -130,7 +131,6 @@ func (a *Agent) recordGap(ctx context.Context, t Target, gap *engine.Gap, log *s
 	}
 	op := a.o.Repo.BeginOperation(repo.CurrentIdentity(), captureJob, t.ID, "", t.Config.Credentials.CaptureCredential().Password)
 	_ = op.Finish(context.WithoutCancel(ctx), repo.ResultOK, errors.New("capture gap: "+gap.Reason))
-	a.forceBackup(t, log, "a capture gap: "+gap.Reason)
 }
 
 // firstStart reports whether capture of a target starts without a
@@ -180,11 +180,15 @@ type segmentSink struct {
 	t   Target
 	log *slog.Logger
 
+	// checkpointed, if set, is told each position checkpointed.
+	checkpointed func(engine.Position)
+
 	mu        sync.Mutex
 	seq       uint64
 	position  engine.Position
 	lastStore time.Time
 	stored    atomic.Int64
+	segments  atomic.Int64
 }
 
 func (s *segmentSink) Segment(ctx context.Context, seg engine.Segment) error {
@@ -227,6 +231,7 @@ func (s *segmentSink) Segment(ctx context.Context, seg engine.Segment) error {
 		return fmt.Errorf("store %s: %w", name, err)
 	}
 	s.stored.Add(int64(len(seg.Data)))
+	s.segments.Add(1)
 	if seg.Checkpoint == "" {
 		return nil
 	}
@@ -239,6 +244,9 @@ func (s *segmentSink) Segment(ctx context.Context, seg engine.Segment) error {
 		return fmt.Errorf("checkpoint %s: %w", seg.Checkpoint, err)
 	}
 	s.position, s.lastStore = seg.Checkpoint, time.Now()
+	if s.checkpointed != nil {
+		s.checkpointed(seg.Checkpoint)
+	}
 	return nil
 }
 

@@ -238,6 +238,21 @@ While the agent holds a MongoDB target's lease, it tails the replica set's oplog
 
 The window is how long an agent can be stopped before capture loses entries. Enlarge the oplog with `replSetResizeOplog` if it holds less than a day.
 
+## `pentym catch-up <target>`
+
+Stores the WAL or oplog a target's server still retains while no agent captures it, then exits: by hand, from cron, or from a standby machine. Postgres keeps WAL for pentym's replication slot, and MongoDB keeps oplog entries until the oplog rolls over, so catch-up fills the recovery window back up to where the server stands when it starts.
+
+```
+$ pentym catch-up prod-pg
+✓ prod-pg: caught up to 1/0/9A000148: stored 12 segments, 186 MiB in 41s
+```
+
+- **Only when no agent captures.** It takes the target's capture lease first: at once if the lease was released (a graceful stop), after the lease has stood unchanged for 2 minutes if an agent crashed (it says it is waiting). If an agent renews the lease meanwhile, that agent is capturing, and catch-up stores nothing and exits with code 1 ([PTM-8001](../errors/PTM-8001.md)). It releases the lease when it exits, so an agent that starts later takes over at once.
+- It stores the log from the last checkpoint up to the server's position when it started, as the agent does (Postgres WAL segments and a final partial segment; MongoDB oplog batches of entries a majority has written), and writes a checkpoint after each. It connects as `credentials.replication` or, without it, `credentials.backup`, and unlocks the repository with any key slot, an agent slot included.
+- **Gaps.** If the log since the checkpoint is gone (the slot was dropped or invalidated by `max_slot_wal_keep_size`, or the oplog rolled over), it records the gap in the repository and the journal, stores what the server still has, reports the gap and exits with code 8 ([PTM-5001](../errors/PTM-5001.md)). Unlike the agent it does not take a base backup itself; run `pentym backup <target>` so recovery starts again after the gap.
+- A target with no log to capture (a standalone MongoDB server) exits with code 10.
+- `--json` prints the report: the checkpoint before and after, the server position drained to, the segments and bytes stored, the lease generation and wait, and the gap, if any.
+
 ## `pentym agent reload`
 
 Asks the running agent to reload its configuration through the control socket, and prints what changed: targets added, removed, restarted and unchanged (`--json` for the lists). Without a running agent it exits with code 5.

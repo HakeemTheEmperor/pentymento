@@ -62,7 +62,11 @@ func (e *walEngine) Capture(ctx context.Context, _ engine.Target, from engine.Po
 	}
 	seg := 3
 	if from != "" {
-		_, _ = fmt.Sscanf(string(from), "1/0/%X000000", &seg)
+		_, lsn, err := parseWALPosition(string(from))
+		if err != nil {
+			return err
+		}
+		seg = int(lsn >> 24) // #nosec G115 -- a small test position
 	}
 	for {
 		select {
