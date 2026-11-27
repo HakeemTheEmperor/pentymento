@@ -55,6 +55,10 @@ type Snapshot struct {
 	Method string `json:"method,omitempty"`
 	// SystemID identifies the database cluster or replica set.
 	SystemID string `json:"system_id,omitempty"`
+	// WALSegmentSize is the Postgres cluster's WAL segment size in bytes;
+	// absent for MongoDB and for snapshots taken before it was recorded,
+	// which means the default of 16 MiB.
+	WALSegmentSize int64 `json:"wal_segment_size,omitempty"`
 }
 
 // Part is one further stream of a snapshot.

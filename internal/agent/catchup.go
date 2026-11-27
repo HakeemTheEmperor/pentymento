@@ -169,7 +169,7 @@ func (a *Agent) acquire(ctx context.Context, lease *lock.Lease, t Target, progre
 				Level: msg.LevelFailed, ID: IDLeaseHeld, Target: t.Name,
 				Fact:   "an agent is capturing this target: its capture lease was renewed while catch-up waited " + (tm.Length + tm.ClaimWait + 2*tm.Check).String(),
 				Impact: "catch-up runs only when no agent captures, so two never write at once; nothing was stored",
-				Next:   "pentym status " + t.Name,
+				Next:   "pentym status",
 			}}
 		}
 		select {

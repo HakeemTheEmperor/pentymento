@@ -115,6 +115,7 @@ func (b *Backup) Run(ctx context.Context) (res *BackupResult, err error) {
 		sw.Describe(func(s *repo.Snapshot) {
 			s.EngineVersion, s.Method, s.SystemID = bb.EngineVersion, bb.Method, bb.SystemID
 			s.StartPosition, s.EndPosition, s.Timeline = string(bb.Start), string(bb.End), bb.Timeline
+			s.WALSegmentSize = bb.WALSegmentSize
 		})
 		res.Snapshot, res.Stats, err = sw.Commit()
 		return err

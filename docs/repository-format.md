@@ -195,6 +195,7 @@ A snapshot's stream is a sequence of chunks. Its ordered list of chunk IDs is st
 | `name` | The main stream's name, such as `base.tar`; absent for a single unnamed stream |
 | `parts` | Further streams committed with the main one, each `{name, size, chunks, list}`: a Postgres backup's tablespace archives (`<oid>.tar`) and `backup_manifest`; absent when there are none |
 | `method`, `system_id` | How the engine took the backup (`native`, `pg_basebackup`) and the database cluster's system identifier |
+| `wal_segment_size` | The Postgres cluster's WAL segment size in bytes, which captured WAL coverage is measured with; absent for MongoDB and in snapshots written before pentym recorded it, meaning the default 16 MiB |
 
 To read a snapshot: for each list block, read the block chunk; for each 32-byte ID in it, read that chunk; concatenate the chunks. Every chunk is checked against its ID after decryption and decompression.
 

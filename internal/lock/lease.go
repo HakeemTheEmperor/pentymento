@@ -305,6 +305,25 @@ func newestGeneration(ctx context.Context, be backend.Backend, target string) (u
 	return gen, key, err
 }
 
+// ReadLease returns the newest record of a target's capture lease, or nil
+// when the target has never had one. Its Time is the holder's wall clock,
+// for people: whether the lease expired is judged by watching the record
+// stay unchanged, never by comparing that time with this host's clock.
+func ReadLease(ctx context.Context, be backend.Backend, target string) (*Record, error) {
+	_, key, err := newestGeneration(ctx, be, target)
+	if err != nil || key == "" {
+		return nil, err
+	}
+	rec, err := getRecord(ctx, be, key)
+	if errors.Is(err, backend.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
+}
+
 // CurrentGeneration returns the newest lease generation of a target, or 0
 // when none exists. Checkpoint writers compare their generation with it.
 func CurrentGeneration(ctx context.Context, be backend.Backend, target string) (uint64, error) {

@@ -116,6 +116,26 @@ type Agent struct {
 	forcedMu sync.Mutex
 	forced   map[string]bool
 	started0 map[string]bool
+
+	// live holds each capturing target's newest monitoring reading.
+	liveMu sync.Mutex
+	live   map[string]LiveCapture
+}
+
+// LiveCapture is a target's newest monitoring reading, for status --live.
+type LiveCapture struct {
+	// Position is the newest stored position; Head the server's.
+	Position string `json:"position,omitempty"`
+	Head     string `json:"server_position,omitempty"`
+	// LagSeconds is how far capture lags (PRD 9.1).
+	LagSeconds float64 `json:"lag_seconds"`
+	// RetainedBytes and RetainedLimit are the WAL the Postgres slot holds
+	// back and max_slot_wal_keep_size (0: no limit).
+	RetainedBytes int64 `json:"slot_retained_bytes,omitempty"`
+	RetainedLimit int64 `json:"slot_retained_limit_bytes,omitempty"`
+	// OplogWindowSeconds is how far back the MongoDB oplog reaches.
+	OplogWindowSeconds float64   `json:"oplog_window_seconds,omitempty"`
+	Checked            time.Time `json:"checked"`
 }
 
 // targetLoop is one target's lease loop.
@@ -183,6 +203,7 @@ func newAgent(o Options) (*Agent, error) {
 		targets:  map[string]*targetLoop{},
 		forced:   map[string]bool{},
 		started0: map[string]bool{},
+		live:     map[string]LiveCapture{},
 	}
 	a.bgCtx, a.bgCancel = context.WithCancel(context.Background())
 	if a.o.Capture == nil && a.o.Engine != nil {
@@ -547,6 +568,8 @@ type TargetStatus struct {
 	Since      time.Time `json:"since,omitzero"`
 	BestEffort bool      `json:"best_effort_lease,omitempty"`
 	LastError  string    `json:"last_error,omitempty"`
+	// Capture is the newest monitoring reading while this agent captures.
+	Capture *LiveCapture `json:"capture,omitempty"`
 }
 
 // Status is the agent's live state, for the control socket.
@@ -570,11 +593,17 @@ func (a *Agent) Status() Status {
 	s.Started = a.started
 	for _, tl := range a.targets {
 		tl.mu.Lock()
-		s.Targets = append(s.Targets, TargetStatus{
+		ts := TargetStatus{
 			Name: tl.t.Name, ID: tl.t.ID, Holding: tl.held, Generation: tl.gen, Since: tl.heldSince,
 			BestEffort: tl.lease.BestEffort(), LastError: tl.lastErr,
-		})
+		}
 		tl.mu.Unlock()
+		a.liveMu.Lock()
+		if lc, ok := a.live[tl.t.Name]; ok && ts.Holding {
+			ts.Capture = &lc
+		}
+		a.liveMu.Unlock()
+		s.Targets = append(s.Targets, ts)
 	}
 	a.mu.Unlock()
 	slices.SortFunc(s.Targets, func(x, y TargetStatus) int {

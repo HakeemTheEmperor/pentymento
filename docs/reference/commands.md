@@ -238,6 +238,28 @@ While the agent holds a MongoDB target's lease, it tails the replica set's oplog
 
 The window is how long an agent can be stopped before capture loses entries. Enlarge the oplog with `replSetResizeOplog` if it holds less than a day.
 
+## `pentym status`
+
+Shows every configured target's real protection, read from the repository, so it works without an agent and from any machine that can read the repository, with any key slot.
+
+```
+TARGET    ENGINE       AGENT              PITR WINDOW                LAST VERIFY
+prod-pg   postgres 17  ✓ capturing (4s)   7d 0h · up to 4s ago      —
+prod-mg   mongodb 8.0  ✗ stale (2h 14m)   6d 22h · up to 14:02 WAT  —
+
+✗ prod-mg: agent last seen 2h 14m ago on db2; changes since 14:02 WAT are not protected
+→ pentym catch-up prod-mg
+```
+
+- **AGENT** is the agent holding the target's capture lease and how long ago it wrote its last heartbeat: `capturing`, `stale` (a warning from 5 minutes, critical from 15), `stopped` (the lease was released), or `none` (no agent has captured the target). A stale or stopped agent comes with the `pentym catch-up` command to run.
+- **PITR WINDOW** is the window point-in-time recovery actually covers, and how recent its newest point is. It runs from the end of the earliest snapshot whose log was captured, through the stored WAL or oplog without a break, to the newest stored change; a missing WAL segment or a recorded gap ([PTM-5001](../errors/PTM-5001.md)) breaks it. When a gap makes it shorter than `retention.pitr_window`, status says so: "configured 7d 0h, actual 2d 4h (gap at 2026-11-21 03:12 WAT)". A MongoDB standalone server shows `snapshots only`.
+- Postgres times inside the window come from when WAL was stored (every 10 seconds while capture runs), MongoDB times from the oplog itself. Postgres WAL is measured with the cluster's WAL segment size, which snapshots record; older snapshots without it count as the default 16 MiB.
+- **LAST VERIFY** comes with `pentym verify`, and the missed-backup check with schedules.
+- It warns when the repository has only one full key slot ([PTM-4006](../errors/PTM-4006.md)).
+- **Automatic catch-up.** With `catch_up.auto: true`, status runs `pentym catch-up` itself for a target whose agent is stopped or stale and that has been captured before (it needs the database's capture credential, as catch-up does). Catch-up takes the lease only once it has expired, so it may wait up to 2 minutes. Without the setting, status only prints the command.
+- `--live` also asks the agent on this machine, through its control socket, for each target it holds: capture lag, the WAL the replication slot retains (with `max_slot_wal_keep_size`) or the oplog window, and its upload queue. When the agent does not answer, status says so and shows what the repository holds.
+- `--json` prints all of it, with times in RFC 3339 UTC; `last_verify` and `dead_man` are `null` until verify and schedules fill them.
+
 ## `pentym catch-up <target>`
 
 Stores the WAL or oplog a target's server still retains while no agent captures it, then exits: by hand, from cron, or from a standby machine. Postgres keeps WAL for pentym's replication slot, and MongoDB keeps oplog entries until the oplog rolls over, so catch-up fills the recovery window back up to where the server stands when it starts.

@@ -319,6 +319,15 @@ func (a *Agent) monitor(ctx context.Context, eng engine.Engine, et engine.Target
 			lag = time.Since(at)
 		}
 		m.CaptureLag.WithLabelValues(et.Name).Set(lag.Seconds())
+		lc := LiveCapture{Position: string(pos), Head: string(h.Head), LagSeconds: lag.Seconds(), Checked: time.Now().UTC()}
+		if h.Oplog {
+			lc.OplogWindowSeconds = h.Window.Seconds()
+		} else {
+			lc.RetainedBytes, lc.RetainedLimit = h.RetainedBytes, h.RetainedLimit
+		}
+		a.liveMu.Lock()
+		a.live[et.Name] = lc
+		a.liveMu.Unlock()
 		lagLevel = report(log, lagLevel, lagAlert(lag), "capture lag", "lag", lag.Round(time.Second).String())
 		if h.Oplog {
 			m.MongoOplogWindow.WithLabelValues(et.Name).Set(h.Window.Seconds())

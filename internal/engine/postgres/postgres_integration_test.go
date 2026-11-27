@@ -240,7 +240,7 @@ func TestPostgres(t *testing.T) {
 				}
 				start, err1 := pglogrepl.ParseLSN(string(bb.Start))
 				end, err2 := pglogrepl.ParseLSN(string(bb.End))
-				if err1 != nil || err2 != nil || end <= start || bb.Timeline != "1" || bb.Method != "native" ||
+				if err1 != nil || err2 != nil || end <= start || bb.Timeline != "1" || bb.Method != "native" || bb.WALSegmentSize != 16<<20 ||
 					bb.SystemID == "" || !strings.HasPrefix(bb.EngineVersion, version+".") {
 					t.Errorf("base backup = %+v", bb)
 				}
@@ -276,7 +276,7 @@ func TestPostgres(t *testing.T) {
 					t.Fatal(err)
 				}
 				checkBaseTar(t, sink.data[BaseArchive].Bytes())
-				if bb.Start == "" || bb.End == "" || bb.Timeline != "1" || bb.SystemID == "" || !strings.HasPrefix(bb.EngineVersion, version+".") {
+				if bb.Start == "" || bb.End == "" || bb.Timeline != "1" || bb.WALSegmentSize != 16<<20 || bb.SystemID == "" || !strings.HasPrefix(bb.EngineVersion, version+".") {
 					t.Errorf("base backup = %+v", bb)
 				}
 			})

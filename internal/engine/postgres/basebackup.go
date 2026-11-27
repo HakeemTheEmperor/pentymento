@@ -91,6 +91,10 @@ func (e *Engine) nativeBaseBackup(ctx context.Context, t engine.Target, sink eng
 	if err != nil {
 		return nil, false, fmt.Errorf("IDENTIFY_SYSTEM: %w", err)
 	}
+	segSize, err := walSegmentSize(ctx, conn)
+	if err != nil {
+		return nil, false, err
+	}
 	// The temporary slot reserves WAL from now until the connection
 	// closes, so the WAL the backup includes cannot be removed meanwhile.
 	slot := "pentym_bb_" + randomHex(6)
@@ -118,7 +122,7 @@ func (e *Engine) nativeBaseBackup(ctx context.Context, t engine.Target, sink eng
 	return &engine.BaseBackup{
 		EngineVersion: version, Method: "native", SystemID: sys.SystemID,
 		Start: engine.Position(start.LSN.String()), End: engine.Position(end.LSN.String()),
-		Timeline: strconv.Itoa(int(end.TimelineID)),
+		Timeline: strconv.Itoa(int(end.TimelineID)), WALSegmentSize: int64(segSize), // #nosec G115 -- at most 1 GiB
 	}, true, nil
 }
 
@@ -259,6 +263,9 @@ func (e *Engine) pgBasebackup(ctx context.Context, t engine.Target, sink engine.
 		}
 		if len(out) == 1 && len(out[0]) == 1 {
 			bb.SystemID = string(out[0][0])
+		}
+		if size, err := walSegmentSize(ctx, conn); err == nil {
+			bb.WALSegmentSize = int64(size) // #nosec G115 -- at most 1 GiB
 		}
 		_ = conn.Close(context.WithoutCancel(ctx))
 	}

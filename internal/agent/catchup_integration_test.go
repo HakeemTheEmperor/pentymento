@@ -19,6 +19,7 @@ import (
 	"github.com/HakeemTheEmperor/pentymento/internal/engine"
 	"github.com/HakeemTheEmperor/pentymento/internal/engine/mongodb"
 	"github.com/HakeemTheEmperor/pentymento/internal/engine/postgres"
+	"github.com/HakeemTheEmperor/pentymento/internal/ops"
 )
 
 // TestCatchUpAfterDowntimePostgres (Build Order C20): WAL written while no
@@ -60,6 +61,12 @@ func TestCatchUpAfterDowntimePostgres(t *testing.T) {
 	exec("INSERT INTO events (note) VALUES ('last')")
 	end := exec("SELECT pg_current_wal_flush_lsn()::text")
 
+	// status: the agent stopped, the window ends at its checkpoint.
+	ts, err := ops.ReadTargetStatus(context.Background(), openAs(t, dir, nil, "admin"), cfg, "prod-pg", nil, nil, time.Now())
+	if err != nil || ts.Agent.State != ops.AgentStopped || ts.Checkpoint == nil || ts.Checkpoint.Position != before.Position || !ts.Window.Logs {
+		t.Fatalf("status before catch-up = %+v, %v", ts, err)
+	}
+
 	co := opts
 	co.Repo, co.Host = openAs(t, dir, nil, "agent"), "cron"
 	res, err := CatchUp(context.Background(), co, "prod-pg", nil)
@@ -80,6 +87,11 @@ func TestCatchUpAfterDowntimePostgres(t *testing.T) {
 		t.Errorf("gaps = %+v, %v", gaps, err)
 	}
 	coverage(t, r, tid, parseLSNText(t, end))
+	ts, err = ops.ReadTargetStatus(context.Background(), r, cfg, "prod-pg", nil, nil, time.Now())
+	if err != nil || ts.Checkpoint == nil || ts.Checkpoint.Position != string(res.To) || ts.Agent.State != ops.AgentStopped ||
+		ts.Agent.Generation != res.Generation || ts.Window.Break != "" {
+		t.Errorf("status after catch-up = %+v, %v", ts, err)
+	}
 }
 
 // TestCatchUpAfterCrashMongoDB (Build Order C20): an agent is killed

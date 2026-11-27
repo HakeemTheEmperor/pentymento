@@ -140,6 +140,7 @@ var implemented = map[string]bool{
 	"pentym agent":              true,
 	"pentym agent reload":       true,
 	"pentym catch-up":           true,
+	"pentym status":             true,
 }
 
 func TestStubsAreNotImplemented(t *testing.T) {
@@ -257,18 +258,18 @@ func TestJSONError(t *testing.T) {
 
 func TestOutputModes(t *testing.T) {
 	// ASCII fallback.
-	r := pentym(t, "--ascii", "status")
-	if r.stderr != "FAIL pentym status is not implemented in this build\n-> pentym --help\n" {
+	r := pentym(t, "--ascii", "prune")
+	if r.stderr != "FAIL pentym prune is not implemented in this build\n-> pentym --help\n" {
 		t.Errorf("--ascii stderr = %q", r.stderr)
 	}
 	// Forced colour on a non-terminal.
-	r = pentym(t, "--color=always", "status")
-	if r.stderr != "\x1b[31m✗\x1b[0m pentym status is not implemented in this build\n→ \x1b[1mpentym --help\x1b[0m\n" {
+	r = pentym(t, "--color=always", "prune")
+	if r.stderr != "\x1b[31m✗\x1b[0m pentym prune is not implemented in this build\n→ \x1b[1mpentym --help\x1b[0m\n" {
 		t.Errorf("--color=always stderr = %q", r.stderr)
 	}
 	// Quiet still shows errors.
-	r = pentym(t, "-q", "status")
-	if !strings.HasPrefix(r.stderr, "✗ pentym status") {
+	r = pentym(t, "-q", "prune")
+	if !strings.HasPrefix(r.stderr, "✗ pentym prune") {
 		t.Errorf("-q hid the error: %q", r.stderr)
 	}
 }
