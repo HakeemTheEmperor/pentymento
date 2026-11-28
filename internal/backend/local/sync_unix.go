@@ -23,3 +23,10 @@ func syncDir(dir string) error {
 
 // withRetry runs op once: only Windows needs rename retries.
 func withRetry(op func() error) error { return op() }
+
+// openRead opens a file for reading.
+func openRead(path string) (*os.File, error) { return os.Open(path) } // #nosec G304 -- a path inside the repository
+
+// replaceFile moves oldpath to newpath, replacing it: atomic, and a reader
+// of the old file keeps reading it.
+func replaceFile(oldpath, newpath string) error { return os.Rename(oldpath, newpath) }
