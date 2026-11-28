@@ -41,7 +41,7 @@ func TestWriteRecovery(t *testing.T) {
 	}
 	conf, _ := readTestFile(filepath.Join(dir, "postgresql.conf"))
 	for _, want := range []string{sideConf, "hot_standby = off\n", "recovery_target_xid = '8812'\n", "recovery_target_inclusive = off\n",
-		"recovery_target_action = 'promote'\n", "recovery_target_timeline = 'latest'\n"} {
+		"recovery_target_action = 'promote'\n", "recovery_target_timeline = 'latest'\n", "restore_command = 'exit 1'\n"} {
 		if !strings.Contains(string(conf), want) {
 			t.Errorf("postgresql.conf lacks %q:\n%s", want, conf)
 		}

@@ -71,6 +71,7 @@ func TestPostgresExtract(t *testing.T) {
 			}}
 			eng.ToolDirs = newestClientTools()
 
+			pgSQL(t, dsn, "DROP TABLE orders") // the shared server's; this test makes its own
 			pgSQL(t, dsn, "CREATE ROLE pentym_restore LOGIN PASSWORD 'restore-pw'")
 			pgSQL(t, dsn, "GRANT USAGE, CREATE ON SCHEMA public TO pentym_restore")
 			pgSQL(t, dsn, "CREATE TABLE customers (id serial PRIMARY KEY, name text NOT NULL)")

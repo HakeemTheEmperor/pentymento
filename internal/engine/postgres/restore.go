@@ -188,6 +188,10 @@ func writeRecovery(dataDir, target string) error {
 	path := filepath.Join(dataDir, "postgresql.conf")
 	conf := sideConf + recoveryMarker +
 		"hot_standby = off\n" + // no login until replay is done
+		// Archive recovery needs a restore_command. This one fails for
+		// every file, under sh and cmd alike, so Postgres reads each from
+		// pg_wal, where pentym put them.
+		"restore_command = 'exit 1'\n" +
 		"recovery_target_timeline = 'latest'\n"
 	if target != "" {
 		conf += target + "recovery_target_inclusive = off\nrecovery_target_action = 'promote'\n"
