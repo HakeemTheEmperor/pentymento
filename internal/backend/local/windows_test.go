@@ -91,3 +91,37 @@ func TestRenameRetriesWhileLocked(t *testing.T) {
 		t.Errorf("content = %q", got)
 	}
 }
+
+// TestReplaceWhileReading: an object being read through Get can be
+// replaced at once, as a lease holder renews the record a standby reads;
+// the reader keeps what it opened.
+func TestReplaceWhileReading(t *testing.T) {
+	b := newTestBackend(t)
+	ctx := context.Background()
+	if err := b.Put(ctx, "locks/lease", strings.NewReader("old"), backend.PutOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	rc, err := b.Get(ctx, "locks/lease", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rc.Close() }()
+	saved := retrySleep
+	var waits int
+	retrySleep = func(time.Duration) { waits++ }
+	t.Cleanup(func() { retrySleep = saved })
+	if err := b.Put(ctx, "locks/lease", strings.NewReader("new"), backend.PutOptions{}); err != nil {
+		t.Fatalf("Put while a reader has the object open: %v", err)
+	}
+	if waits != 0 {
+		t.Errorf("the replace waited %d times for the reader", waits)
+	}
+	buf := make([]byte, 8)
+	n, _ := rc.Read(buf)
+	if string(buf[:n]) != "old" {
+		t.Errorf("the reader sees %q", buf[:n])
+	}
+	if got, _ := os.ReadFile(filepath.Join(b.Root(), "locks", "lease")); string(got) != "new" { // #nosec G304 -- test file
+		t.Errorf("content = %q", got)
+	}
+}

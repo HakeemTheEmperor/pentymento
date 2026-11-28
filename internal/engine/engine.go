@@ -87,8 +87,11 @@ type BaseBackup struct {
 	// standalone has no oplog, so neither.
 	Start, End Position
 	// Timeline is the Postgres timeline; empty for MongoDB.
-	Timeline  string
-	Inventory json.RawMessage
+	Timeline string
+	// WALSegmentSize is the Postgres cluster's WAL segment size in bytes,
+	// which captured WAL coverage is measured with; 0 for MongoDB.
+	WALSegmentSize int64
+	Inventory      json.RawMessage
 }
 
 // ArchiveSink receives a base backup's archives in order. A Postgres

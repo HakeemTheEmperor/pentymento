@@ -62,7 +62,11 @@ func (e *walEngine) Capture(ctx context.Context, _ engine.Target, from engine.Po
 	}
 	seg := 3
 	if from != "" {
-		_, _ = fmt.Sscanf(string(from), "1/0/%X000000", &seg)
+		_, lsn, err := parseWALPosition(string(from))
+		if err != nil {
+			return err
+		}
+		seg = int(lsn >> 24) // #nosec G115 -- a small test position
 	}
 	for {
 		select {
@@ -278,12 +282,18 @@ func TestMonitor(t *testing.T) {
 	dir := newRepoDir(t)
 	e := &walEngine{segEvery: time.Hour, health: engine.LogHealth{Head: "1/0/9000000", RetainedBytes: 12 << 30}}
 	o := captureOptions(t, dir, e, &backups{})
-	start(t, o)
+	r := start(t, o)
 	m := o.Telemetry.Metrics
 	waitFor(t, "the metrics", 5*time.Second, func() bool {
 		return testutil.ToFloat64(m.PGSlotRetainedWAL.WithLabelValues("prod-pg")) == 12<<30 &&
 			testutil.ToFloat64(m.CaptureLag.WithLabelValues("prod-pg")) > 0
 	})
+	// status --live reads the same reading.
+	st := r.a.Status()
+	if len(st.Targets) != 1 || st.Targets[0].Capture == nil || st.Targets[0].Capture.RetainedBytes != 12<<30 ||
+		st.Targets[0].Capture.Head != "1/0/9000000" || st.Targets[0].Capture.LagSeconds <= 0 {
+		t.Errorf("live status = %+v", st.Targets)
+	}
 }
 
 // oplogEngine is a fake MongoDB engine whose capture stores numbered
@@ -398,11 +408,14 @@ func TestMonitorOplog(t *testing.T) {
 	dir := newRepoDir(t)
 	e := &oplogEngine{walEngine{segEvery: time.Hour, health: engine.LogHealth{Oplog: true, Head: "1700000000:9", Window: 3 * time.Hour}}}
 	o := oplogOptions(t, dir, e)
-	start(t, o)
+	r := start(t, o)
 	m := o.Telemetry.Metrics
 	waitFor(t, "the metrics", 5*time.Second, func() bool {
 		return testutil.ToFloat64(m.MongoOplogWindow.WithLabelValues("prod-pg")) == (3 * time.Hour).Seconds()
 	})
+	if c := r.a.Status().Targets[0].Capture; c == nil || c.OplogWindowSeconds != (3*time.Hour).Seconds() || c.RetainedBytes != 0 {
+		t.Errorf("live capture = %+v", c)
+	}
 	if n := testutil.CollectAndCount(m.PGSlotRetainedWAL); n != 0 {
 		t.Errorf("an oplog capture published %d retained-WAL series", n)
 	}

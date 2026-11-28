@@ -112,7 +112,7 @@ func (b *Backend) Put(ctx context.Context, key string, r io.Reader, opts backend
 	if opts.IfNotExists {
 		err = b.noReplace(tmpName, target)
 	} else {
-		err = withRetry(func() error { return os.Rename(tmpName, target) })
+		err = replaceFile(tmpName, target)
 	}
 	if err != nil {
 		return err
@@ -149,7 +149,7 @@ func (b *Backend) Get(ctx context.Context, key string, rng *backend.Range) (io.R
 	// A file just published can be briefly locked on Windows (antivirus,
 	// indexers), as for Put's rename.
 	var f *os.File
-	err := withRetry(func() (err error) { f, err = os.Open(b.path(key)); return err })
+	err := withRetry(func() (err error) { f, err = openRead(b.path(key)); return err })
 	if err != nil {
 		return nil, mapNotFound(key, err)
 	}

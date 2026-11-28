@@ -255,3 +255,7 @@ func (cliMongoFake) DetectGap(context.Context, engine.Target, engine.Position) (
 func (cliMongoFake) Capture(context.Context, engine.Target, engine.Position, engine.LogSink) error {
 	return errors.ErrUnsupported
 }
+
+func (cliMongoFake) LogHealth(context.Context, engine.Target) (*engine.LogHealth, error) {
+	return nil, errors.ErrUnsupported
+}

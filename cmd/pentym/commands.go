@@ -58,11 +58,11 @@ func (a *app) rootCommand() *cobra.Command {
 		a.initCommand(),
 		a.backupCommand(),
 		a.agentCommand(),
-		catchUpCommand(),
+		a.catchUpCommand(),
 		restoreCommand(),
 		eventsCommand(),
 		a.listCommand(),
-		statusCommand(),
+		a.statusCommand(),
 		verifyCommand(),
 		a.checkCommand(),
 		pruneCommand(),
@@ -124,11 +124,6 @@ func group(use, short string, ex ...string) *cobra.Command {
 	}
 }
 
-func catchUpCommand() *cobra.Command {
-	return stub("catch-up <target>", "Upload the WAL or oplog retained while the agent was down", args("<target>"),
-		"Catch up prod-mg after agent downtime", "pentym catch-up prod-mg")
-}
-
 func restoreCommand() *cobra.Command {
 	c := stub("restore <target>", "Restore a target to a point in time", args("<target>"),
 		"Restore prod-pg to just before event 3", "pentym restore prod-pg --before-event 3",
@@ -147,14 +142,6 @@ func eventsCommand() *cobra.Command {
 	c := stub("events <target>", "List detected destructive events", args("<target>"),
 		"List events on prod-pg in the last 2 hours", "pentym events prod-pg --since 2h")
 	c.Flags().String("since", "", "show events from this long ago, such as 2h")
-	return c
-}
-
-func statusCommand() *cobra.Command {
-	c := stub("status", "Show recovery windows, agent heartbeats and the last verify", args(),
-		"Show every target's recovery window", "pentym status",
-		"Ask the running agent for live status", "pentym status --live")
-	c.Flags().Bool("live", false, "ask the running agent for live status through the control socket")
 	return c
 }
 

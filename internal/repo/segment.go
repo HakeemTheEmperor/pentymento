@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"time"
 
 	"github.com/HakeemTheEmperor/pentymento/internal/backend"
 	"github.com/HakeemTheEmperor/pentymento/internal/compress"
@@ -65,6 +66,9 @@ type WALSegment struct {
 	Partial bool
 	EndLSN  LSN
 	Size    int64
+	// Stored is when the storage last wrote the object: within seconds of
+	// when its WAL was written, since capture stores WAL every 10 s.
+	Stored time.Time
 }
 
 func walSegmentKey(tid string, tl Timeline, name string) string {
@@ -97,6 +101,8 @@ type OplogBatch struct {
 	First OplogTS
 	Last  OplogTS
 	Size  int64
+	// Stored is when the storage last wrote the object.
+	Stored time.Time
 }
 
 func oplogBatchKey(tid string, first, last OplogTS) string {
@@ -204,7 +210,7 @@ func (r *Repository) WALSegments(ctx context.Context, tid string) ([]WALSegment,
 			return nil // timeline history or an unrelated object
 		}
 		tl, _ := strconv.ParseUint(m[1], 16, 32)
-		s := WALSegment{Key: oi.Key, Timeline: Timeline(tl), Name: m[2], Size: oi.Size}
+		s := WALSegment{Key: oi.Key, Timeline: Timeline(tl), Name: m[2], Size: oi.Size, Stored: oi.ModTime}
 		if m[3] != "" {
 			end, _ := strconv.ParseUint(m[3], 16, 64)
 			s.Partial, s.EndLSN = true, LSN(end)
@@ -233,7 +239,7 @@ func (r *Repository) OplogBatches(ctx context.Context, tid string) ([]OplogBatch
 			}
 			n[i] = uint32(v)
 		}
-		out = append(out, OplogBatch{Key: oi.Key, First: OplogTS{n[0], n[1]}, Last: OplogTS{n[2], n[3]}, Size: oi.Size})
+		out = append(out, OplogBatch{Key: oi.Key, First: OplogTS{n[0], n[1]}, Last: OplogTS{n[2], n[3]}, Size: oi.Size, Stored: oi.ModTime})
 		return nil
 	})
 	return out, err
