@@ -180,7 +180,8 @@ func TestRestoreMaterializes(t *testing.T) {
 			t.Errorf("%s is in the data directory", gone)
 		}
 	}
-	if _, _, err := e.Restore(context.Background(), engine.RestoreRequest{Point: engine.Point{XID: "1"}}, start); !errors.Is(err, errNotYet) {
-		t.Errorf("restore to a point = %v", err)
+	// A restore to a point replays stored WAL, which it must be given.
+	if _, _, err := e.Restore(context.Background(), engine.RestoreRequest{Point: engine.Point{XID: "1"}}, start); err == nil || !strings.Contains(err.Error(), "needs the stored WAL") {
+		t.Errorf("restore to a point without WAL = %v", err)
 	}
 }

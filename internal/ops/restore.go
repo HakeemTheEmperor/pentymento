@@ -37,7 +37,12 @@ type Restore struct {
 	Target engine.Target
 	// SnapshotID chooses the snapshot; empty means the target's latest.
 	SnapshotID string
-	Instances  Starter
+	// Point, when set, restores to that point: the anchor snapshot is
+	// chosen for it and the stored log replayed (SnapshotID is then not
+	// used). When formats times in messages; nil means RFC 3339.
+	Point     engine.Point
+	When      func(time.Time) string
+	Instances Starter
 	// WorkDir holds the restore's data directory.
 	WorkDir    string
 	Identity   repo.Identity
@@ -104,8 +109,19 @@ func (o *Restore) Run(ctx context.Context) (res *RestoreResult, err error) {
 		}
 	}()
 	err = WithLock(ctx, o.Repo, false, func() error {
-		s, err := o.pick(ctx, tid)
-		if err != nil {
+		var logs engine.LogSource
+		var segSize uint64
+		var s *repo.Snapshot
+		if o.Point != (engine.Point{}) {
+			plan, err := o.plan(ctx, tid)
+			if err != nil {
+				return err
+			}
+			s, segSize = &plan.Snapshot, plan.SegmentSize
+			if logs, err = newWALSource(ctx, o.Repo, tid, plan); err != nil {
+				return err
+			}
+		} else if s, err = o.pick(ctx, tid); err != nil {
 			return err
 		}
 		res.Snapshot = s
@@ -125,8 +141,9 @@ func (o *Restore) Run(ctx context.Context) (res *RestoreResult, err error) {
 			Backup: engine.BaseBackup{
 				EngineVersion: s.EngineVersion, Method: s.Method, SystemID: s.SystemID,
 				Start: engine.Position(s.StartPosition), End: engine.Position(s.EndPosition),
-				Timeline: s.Timeline, Inventory: s.Inventory,
+				Timeline: s.Timeline, Inventory: s.Inventory, WALSegmentSize: int64(segSize), // #nosec G115 -- at most 1 GiB
 			},
+			Logs: logs, Point: o.Point,
 			DataDir: res.DataDir,
 		}
 		startFn := func(ctx context.Context, version, dataDir string) (instance.Instance, error) {
@@ -142,6 +159,36 @@ func (o *Restore) Run(ctx context.Context) (res *RestoreResult, err error) {
 		res.Reached.Time = res.Snapshot.End
 	}
 	return res, nil
+}
+
+// plan chooses the anchor snapshot and the log to replay to o.Point.
+func (o *Restore) plan(ctx context.Context, tid string) (*WALPlan, error) {
+	if o.Engine.Name() != "postgres" {
+		return nil, fmt.Errorf("restoring %s to a point: %w", o.Engine.Name(), errors.ErrUnsupported)
+	}
+	all, err := o.Repo.Snapshots(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var snaps []repo.Snapshot
+	for _, s := range all {
+		if s.Target == tid && s.Engine == o.Engine.Name() {
+			snaps = append(snaps, s)
+		}
+	}
+	segs, err := o.Repo.WALSegments(ctx, tid)
+	if err != nil {
+		return nil, err
+	}
+	gaps, err := o.Repo.Gaps(ctx, tid)
+	if err != nil {
+		return nil, err
+	}
+	when := o.When
+	if when == nil {
+		when = func(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+	}
+	return PlanPostgres(o.Target.Name, snaps, segs, gaps, o.Point, when)
 }
 
 // pick returns the chosen snapshot, or the target's newest.

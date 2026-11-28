@@ -357,9 +357,17 @@ func TestCaptureOplog(t *testing.T) {
 	if err != nil || string(data) != "oplog 1700000000:1-1700000000:2" {
 		t.Errorf("batch content = %q, %v", data, err)
 	}
-	last := batches[len(batches)-1].Last
-	if cp.Position != fmt.Sprintf("%d:%d", last.T, last.I) {
-		t.Errorf("checkpoint %s, last stored batch ends at %+v", cp.Position, last)
+	// The checkpoint is at the end of a stored batch. A stop can cut the
+	// last checkpoint short after its batch was stored: at most that one
+	// batch lies after it, and is stored again on resume.
+	at := -1
+	for i, b := range batches {
+		if cp.Position == fmt.Sprintf("%d:%d", b.Last.T, b.Last.I) {
+			at = i
+		}
+	}
+	if at < 0 || len(batches)-1-at > 1 {
+		t.Errorf("checkpoint %s; stored batches end at %+v", cp.Position, batches)
 	}
 
 	e2 := &oplogEngine{walEngine{segEvery: 30 * time.Millisecond}}

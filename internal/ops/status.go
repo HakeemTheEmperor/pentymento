@@ -250,124 +250,24 @@ func agentView(lease *lock.Record, hbs []repo.Heartbeat, now time.Time) AgentVie
 	return v
 }
 
-// walPiece is what is stored of one WAL segment.
-type walPiece struct {
-	complete   bool
-	partialEnd repo.LSN
-	stored     time.Time
-}
-
-// PostgresWindow computes a Postgres target's window: the run of stored
-// WAL segments that reaches the newest one without a missing segment or a
-// recorded gap, from the earliest snapshot whose WAL lies inside it.
-// Times come from snapshots and from when segments were stored.
+// PostgresWindow computes a Postgres target's window: the newest run of
+// stored WAL (see layoutWAL), from the earliest snapshot whose WAL lies
+// inside it. Times come from snapshots and from when segments were stored.
 func PostgresWindow(snaps []repo.Snapshot, segs []repo.WALSegment, gaps []repo.Gap) Window {
-	size := uint64(defaultWALSegmentSize)
-	for i := len(snaps) - 1; i >= 0; i-- {
-		if snaps[i].WALSegmentSize > 0 {
-			size = uint64(snaps[i].WALSegmentSize) // #nosec G115 -- a positive size
-			break
-		}
-	}
-	pieces := map[uint64]*walPiece{}
-	for _, s := range segs {
-		n, ok := segmentNumber(s.Name, size)
-		if !ok {
-			continue
-		}
-		p := pieces[n]
-		if p == nil {
-			p = &walPiece{}
-			pieces[n] = p
-		}
-		if s.Partial {
-			p.partialEnd = max(p.partialEnd, s.EndLSN)
-		} else {
-			p.complete = true
-		}
-		if s.Stored.After(p.stored) {
-			p.stored = s.Stored
-		}
-	}
-	w := Window{Logs: len(pieces) > 0}
+	l := layoutWAL(snaps, segs, gaps)
+	w := Window{Logs: len(l.runs) > 0}
 	if !w.Logs {
 		return w
 	}
-	nums := make([]uint64, 0, len(pieces))
-	for n := range pieces {
-		nums = append(nums, n)
-	}
-	sort.Slice(nums, func(i, j int) bool { return nums[i] < nums[j] })
-	last := nums[len(nums)-1]
-	end := (last + 1) * size
-	if !pieces[last].complete {
-		end = uint64(pieces[last].partialEnd)
-	}
-	w.End = pieces[last].stored
-	// Walk back while each earlier segment is stored complete; below the
-	// oldest stored segment is where capture began, not a break.
-	first := last
-	for first > nums[0] {
-		p := pieces[first-1]
-		if p != nil && p.complete {
-			first--
-			continue
-		}
-		if p == nil {
-			w.Break = fmt.Sprintf("WAL segment %s is missing", segmentLabel(first-1, size))
-		} else {
-			w.Break = fmt.Sprintf("WAL segment %s is stored only up to %X/%X", segmentLabel(first-1, size), uint64(p.partialEnd)>>32, uint64(p.partialEnd)&0xFFFFFFFF)
-		}
-		w.BreakTime = breakTime(pieces, first)
-		break
-	}
-	start := first * size
-	// A recorded gap inside the run moves its start past the gap.
-	for _, g := range gaps {
-		from, okFrom := walPositionLSN(g.From)
-		to, okTo := walPositionLSN(g.To)
-		var after uint64
-		switch {
-		case okTo:
-			after = uint64(to)
-		case okFrom:
-			after = uint64(from) + 1
-		default:
-			continue
-		}
-		if after > start && after <= end {
-			start = after
-			w.Break, w.BreakTime = g.Reason, g.Time
-		}
-	}
-	// The earliest snapshot whose WAL lies inside the run starts the
-	// window.
-	for _, s := range snaps {
-		sl, ok1 := lsnOf(s.StartPosition)
-		el, ok2 := lsnOf(s.EndPosition)
-		if !ok1 || !ok2 || uint64(sl) < start || uint64(el) > end {
-			continue
-		}
-		if !w.PITR || s.End.Before(w.Start) {
-			w.PITR, w.Start = true, s.End
-		}
+	run := l.runs[len(l.runs)-1]
+	w.End, w.Break, w.BreakTime = run.endTime, run.breakBefore, run.breakTime
+	if s := run.earliest(snaps); s != nil {
+		w.PITR, w.Start = true, s.End
 	}
 	if w.PITR && w.End.Before(w.Start) {
 		w.End = w.Start // stored before the snapshot finished: the snapshot itself is the newest point
 	}
 	return w
-}
-
-// breakTime is when the WAL before a missing segment was stored: the
-// newest piece below n.
-func breakTime(pieces map[uint64]*walPiece, n uint64) time.Time {
-	var t time.Time
-	for m, p := range pieces {
-		if m < n && p.stored.After(t) {
-			t = p.stored
-		}
-	}
-	return t
 }
 
 // segmentLabel names a segment by its number, as its file name without
