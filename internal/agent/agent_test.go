@@ -25,11 +25,14 @@ import (
 
 var fastKDF = crypto.KDFParams{Name: "argon2id", MemoryKiB: 8 << 10, Time: 1, Threads: 1}
 
-// fastTimings keep the lease's proportions (step down well before anyone
-// may take over) at a fraction of the real durations.
+// fastTimings keep the lease's order (renew, then step down, then
+// takeover, well apart) at a fraction of the real durations. A holder
+// tolerates StepDown-Renew (2.1 s) without a successful write: CI disks,
+// Windows' especially, stall writes for over a second under load, and a
+// holder that cannot write in time steps down, as it must.
 var fastTimings = lock.LeaseTimings{
-	Length: time.Second, Renew: 200 * time.Millisecond, Check: 50 * time.Millisecond,
-	StepDown: 700 * time.Millisecond, ClaimWait: 200 * time.Millisecond,
+	Length: 3 * time.Second, Renew: 300 * time.Millisecond, Check: 50 * time.Millisecond,
+	StepDown: 2400 * time.Millisecond, ClaimWait: 300 * time.Millisecond,
 }
 
 // newRepoDir creates an encrypted repository with a full slot ("admin")
@@ -286,7 +289,9 @@ func TestStepDown(t *testing.T) {
 		t.Error("the agent still reports the lease")
 	}
 	fb.fail.Store(false)
-	waitFor(t, "the lease again", 5*time.Second, func() bool { return h.holder("prod-pg") == "a" && capturing.Load() == 1 })
+	// Its own record stood unchanged while it failed: it takes the lease
+	// again after the lease length, like any candidate.
+	waitFor(t, "the lease again", fastTimings.Length+5*time.Second, func() bool { return h.holder("prod-pg") == "a" && capturing.Load() == 1 })
 }
 
 // TestCaptureRestarts: a capture that fails is started again while the
