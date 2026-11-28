@@ -74,14 +74,14 @@ func (e *Engine) findTool(name string) (string, error) {
 	return toolrun.Find(name, "mongodb", e.ToolDirs, e.LookPath)
 }
 
-// Extract comes with restores.
-func (*Engine) Extract(context.Context, instance.Instance, engine.Target, engine.ExtractRequest) error {
-	return errNotYet
+// Extract comes with point-in-time restores.
+func (*Engine) Extract(context.Context, instance.Instance, engine.Target, engine.ExtractRequest) (*engine.ExtractResult, error) {
+	return nil, errNotYet
 }
 
-// Rewind comes with restores.
-func (*Engine) Rewind(context.Context, engine.Target, engine.RestoreRequest, engine.StartFunc) error {
-	return errNotYet
+// Rewind comes with point-in-time restores.
+func (*Engine) Rewind(context.Context, engine.Target, engine.RestoreRequest, engine.StartFunc) (*engine.Reached, error) {
+	return nil, errNotYet
 }
 
 // VerifyContents comes with verification.

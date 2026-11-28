@@ -229,8 +229,37 @@ type Reached struct {
 // ExtractRequest asks to copy objects from a side instance into
 // production, under a safe name unless InPlace (PRD 7.5).
 type ExtractRequest struct {
+	// Objects are tables ("orders", "billing.invoices") or collections.
 	Objects []string
+	// InPlace loads them under their own names; they must not exist.
 	InPlace bool
+	// Suffix makes the safe name, such as "_recovered_20261122"; when that
+	// name is taken, _2, _3… follow it. Objects belonging to a table
+	// (indexes, sequences) get the same suffix.
+	Suffix string
+}
+
+// Extracted is one object loaded into production.
+type Extracted struct {
+	// Source is the object as asked for; Name what it is called in
+	// production, both schema-qualified.
+	Source, Name string
+	Rows         int64
+}
+
+// SkippedConstraint is a foreign key left out of an extraction because
+// it refers to a table that was not extracted.
+type SkippedConstraint struct {
+	// Table is the extracted table, as named in production.
+	Table, Name string
+	// References is the table it refers to; Statement adds it back.
+	References, Statement string
+}
+
+// ExtractResult is what an extraction loaded.
+type ExtractResult struct {
+	Objects            []Extracted
+	SkippedForeignKeys []SkippedConstraint
 }
 
 // Engine is one database engine (SDD 4.2). Every method that talks to a
@@ -261,9 +290,11 @@ type Engine interface {
 	// as a superuser of the side instance; the caller stops it.
 	Restore(ctx context.Context, req RestoreRequest, start StartFunc) (instance.Instance, *Reached, error)
 	// Extract copies objects from a side instance into the target.
-	Extract(ctx context.Context, from instance.Instance, to Target, req ExtractRequest) error
-	// Rewind restores the whole target to req.Point (opt-in, destructive).
-	Rewind(ctx context.Context, t Target, req RestoreRequest, start StartFunc) error
+	Extract(ctx context.Context, from instance.Instance, to Target, req ExtractRequest) (*ExtractResult, error)
+	// Rewind restores the whole cluster to req.Point into req.DataDir and
+	// stops it cleanly, ready to replace production's (opt-in,
+	// destructive once swapped in); it never touches production itself.
+	Rewind(ctx context.Context, t Target, req RestoreRequest, start StartFunc) (*Reached, error)
 	// Inventory summarizes a server's contents for the snapshot record.
 	Inventory(ctx context.Context, t Target) (json.RawMessage, error)
 	// VerifyContents checks a side instance's integrity (pg_amcheck,

@@ -80,6 +80,8 @@ var entries = []Entry{
 	{ID: "PTM-5001", Name: "capture-gap"},
 	{ID: "PTM-6001", Name: "no-instance-provider"},
 	{ID: "PTM-6002", Name: "restore-point-unreachable"},
+	{ID: "PTM-6003", Name: "restore-object-exists"},
+	{ID: "PTM-6004", Name: "restore-object-missing"},
 	{ID: "PTM-7001", Name: "object-missing"},
 	{ID: "PTM-7002", Name: "object-corrupt"},
 	{ID: "PTM-7003", Name: "pack-unindexed"},

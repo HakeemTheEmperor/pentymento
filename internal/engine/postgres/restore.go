@@ -469,6 +469,11 @@ func (e *Engine) lockSideInstance(ctx context.Context, inst instance.Instance, r
 		return instance.Conn{}, err
 	}
 	pw = secrets.New([]byte(hex.EncodeToString(b)))
+	existing, err := query(ctx, conn, "SELECT 1 FROM pg_roles WHERE rolname = '"+SideRole+"'")
+	if err != nil {
+		return instance.Conn{}, err
+	}
+	e.sideRoleExisted = len(existing) > 0
 	sql := fmt.Sprintf(`DO $$ BEGIN
 IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '%[1]s') THEN ALTER ROLE %[1]s SUPERUSER LOGIN PASSWORD '%[2]s';
 ELSE CREATE ROLE %[1]s SUPERUSER LOGIN PASSWORD '%[2]s'; END IF; END $$`, SideRole, pw.Expose())

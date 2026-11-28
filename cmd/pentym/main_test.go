@@ -141,6 +141,7 @@ var implemented = map[string]bool{
 	"pentym agent reload":       true,
 	"pentym catch-up":           true,
 	"pentym status":             true,
+	"pentym restore":            true,
 }
 
 func TestStubsAreNotImplemented(t *testing.T) {
@@ -230,7 +231,7 @@ func TestUsageErrors(t *testing.T) {
 }
 
 func TestJSONError(t *testing.T) {
-	r := pentym(t, "--json", "restore", "prod-pg")
+	r := pentym(t, "--json", "prune")
 	if r.code != msg.ExitNotImplemented {
 		t.Fatalf("exit code = %d", r.code)
 	}
@@ -243,7 +244,7 @@ func TestJSONError(t *testing.T) {
 	if err := json.Unmarshal([]byte(r.stdout), &doc); err != nil {
 		t.Fatalf("stdout is not one JSON document: %v\n%s", err, r.stdout)
 	}
-	want := map[string]string{"message": "pentym restore is not implemented in this build", "next": "pentym --help"}
+	want := map[string]string{"message": "pentym prune is not implemented in this build", "next": "pentym --help"}
 	if len(doc.Error) != len(want) || doc.Error["message"] != want["message"] || doc.Error["next"] != want["next"] {
 		t.Errorf("error document = %v, want %v", doc.Error, want)
 	}

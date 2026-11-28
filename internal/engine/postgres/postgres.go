@@ -39,6 +39,9 @@ type Engine struct {
 	RunID string
 	// Observer, if set, receives captured WAL as it arrives.
 	Observer WALObserver
+	// sideRoleExisted records whether the last restored cluster already
+	// had pentym's side role, so a rewind leaves it rather than dropping it.
+	sideRoleExisted bool
 }
 
 var _ engine.Engine = (*Engine)(nil)
@@ -66,16 +69,6 @@ func (e *Engine) logger() *slog.Logger {
 		return e.Logger
 	}
 	return slog.New(slog.DiscardHandler)
-}
-
-// Extract comes with restores (C16).
-func (*Engine) Extract(context.Context, instance.Instance, engine.Target, engine.ExtractRequest) error {
-	return errNotYet
-}
-
-// Rewind comes with restores.
-func (*Engine) Rewind(context.Context, engine.Target, engine.RestoreRequest, engine.StartFunc) error {
-	return errNotYet
 }
 
 // VerifyContents comes with verification.

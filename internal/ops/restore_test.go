@@ -252,3 +252,101 @@ func TestRestoreConstantMemory(t *testing.T) {
 		t.Errorf("peak live heap %d MiB exceeds %d MiB", p>>20, limit>>20)
 	}
 }
+
+// extractEngine restores like restoreEngine, then records the extraction
+// asked for, and rewinds by writing a file.
+type extractEngine struct {
+	*restoreEngine
+	got     engine.ExtractRequest
+	stopped bool
+	rewound string
+}
+
+func (e *extractEngine) Extract(_ context.Context, from instance.Instance, _ engine.Target, req engine.ExtractRequest) (*engine.ExtractResult, error) {
+	e.got = req
+	e.stopped = from.(*fakeInstance).stopped.Load()
+	return &engine.ExtractResult{Objects: []engine.Extracted{{Source: "public.orders", Name: "public.orders" + req.Suffix, Rows: 3}}}, nil
+}
+
+func (e *extractEngine) Rewind(ctx context.Context, _ engine.Target, req engine.RestoreRequest, start engine.StartFunc) (*engine.Reached, error) {
+	inst, reached, err := e.Restore(ctx, req, start)
+	if err != nil {
+		return nil, err
+	}
+	e.rewound = req.DataDir
+	return reached, inst.Stop(ctx)
+}
+
+// TestRestoreExtract: the side instance is up while tables are
+// extracted, then stopped and removed; the safe name comes from the time
+// restored to.
+func TestRestoreExtract(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	b, err := f.backup(&fakeEngine{baseSize: 1 << 20, seed: 1}).Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := filepath.Join(t.TempDir(), "work")
+	e := &extractEngine{restoreEngine: &restoreEngine{fakeEngine: &fakeEngine{}, be: f.be}}
+	st := &fakeStarter{}
+	o := f.restore(t, e, st, work)
+	o.Extract = &engine.ExtractRequest{Objects: []string{"orders"}}
+	o.Suffix = func(at time.Time) string { return "_recovered_" + at.UTC().Format("20060102") }
+	res, err := o.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "_recovered_" + b.Snapshot.End.UTC().Format("20060102")
+	if e.got.Suffix != want || e.stopped || len(res.Extracted.Objects) != 1 || res.Extracted.Objects[0].Name != "public.orders"+want {
+		t.Errorf("extract = %+v (stopped before: %v), result %+v", e.got, e.stopped, res.Extracted)
+	}
+	if !st.inst.stopped.Load() || res.Instance != nil {
+		t.Error("the side instance was not stopped after the extraction")
+	}
+	if entries, _ := os.ReadDir(work); len(entries) != 0 {
+		t.Errorf("the side instance's directory is left: %v", entries)
+	}
+	j, err := f.admin(t).Journal(ctx, time.Time{}, "")
+	if err != nil || j[len(j)-1].Operation != "restore" || j[len(j)-1].Result != repo.ResultOK {
+		t.Errorf("journal = %+v, %v", j, err)
+	}
+}
+
+// TestRestoreRewind: a rewind writes into the directory given and keeps
+// it; a directory that is not empty, or relative, is refused.
+func TestRestoreRewind(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	if _, err := f.backup(&fakeEngine{baseSize: 1 << 20, seed: 1}).Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "rewound")
+	e := &extractEngine{restoreEngine: &restoreEngine{fakeEngine: &fakeEngine{}, be: f.be}}
+	o := f.restore(t, e, &fakeStarter{}, filepath.Join(t.TempDir(), "work"))
+	o.RewindDir = dir
+	res, err := o.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.rewound != dir || res.DataDir != dir {
+		t.Errorf("rewound into %q, result %q", e.rewound, res.DataDir)
+	}
+	if err := res.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "PG_VERSION")); err != nil {
+		t.Errorf("the rewound directory was not kept: %v", err)
+	}
+	for _, bad := range []string{dir, "relative/dir"} {
+		o := f.restore(t, e, &fakeStarter{}, filepath.Join(t.TempDir(), "work"))
+		o.RewindDir = bad
+		var me *msg.Error
+		if _, err := o.Run(ctx); !errors.As(err, &me) || me.Code != msg.ExitUsage {
+			t.Errorf("rewind into %q = %v", bad, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "PG_VERSION")); err != nil {
+		t.Error("a refused rewind touched the directory")
+	}
+}
