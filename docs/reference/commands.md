@@ -141,6 +141,35 @@ It unlocks the repository with any key slot; an agent slot is enough. It prints 
 
 Lists the snapshots, oldest first: ID, target, engine and version, start time, duration, size of all its streams, and whether it is pinned (with the reason). `--json` adds the log positions, the timeline, the streams and the backup method. It unlocks the repository with any key slot. Log coverage is added with continuous capture.
 
+## `pentym restore <target>`
+
+Restores a target to just before a point in time and loads the tables you lost back into production, leaving everything else in production as it is. It reads only the repository, never needs the agent, and unlocks the repository with a full key slot. Postgres only in this build.
+
+```
+$ pentym restore prod-pg --xid 8812 --table orders
+✓ prod-pg: restored public.orders as public.orders_recovered_20261122: 104 rows, as just before transaction 8812 (last change replayed: 14:02:58 WAT)
+! prod-pg: left out foreign key orders_customer_id_fkey of public.orders_recovered_20261122, which refers to customers, a table that was not restored
+  the restored rows are not checked against customers
+→ ALTER TABLE "public"."orders_recovered_20261122" ADD CONSTRAINT "orders_customer_id_fkey" FOREIGN KEY (customer_id) REFERENCES customers(id);
+```
+
+**The point**, exactly one of:
+
+| Flag | Restores to just before |
+| --- | --- |
+| `--at <time>` | a time: RFC 3339 (`2026-11-22T14:03:00+01:00`), or `2026-11-22 14:03[:12]` in local time |
+| `--xid <id>` | a transaction's commit |
+| `--lsn <position>` | a WAL position, such as `0/3A00F128` |
+| `--before-event <n>` | an event (comes with event detection) |
+
+pentym picks the newest snapshot taken before the point whose WAL continues, without a break, up to the point, restores it into a side instance (see [tools](../tools.md#restoring-a-snapshot-into-a-side-instance)), and replays the stored WAL to just before the point. For `--xid`, whose time is not known until replay, it replays from the earliest snapshot of the newest unbroken stretch of WAL. A point that cannot be reached, because it is after the newest stored change, before the earliest reachable point, or in a gap, is refused with the gap and the ranges that can be reached ([PTM-6002](../errors/PTM-6002.md), exit 8).
+
+**Loading tables.** `--table` names a table to load, `orders` (schema `public`) or `billing.invoices`; repeat it for more. Each is loaded as `<table>_recovered_<date>`, the date being the restore point's in local time, with `_2`, `_3`… when that name is taken; its indexes and owned sequences get the same suffix, so nothing collides with the live table. With `--in-place` it is loaded under its own name instead, which only works for a table that no longer exists ([PTM-6003](../errors/PTM-6003.md)). Constraints, indexes, owned sequences with their values, defaults and triggers come along. A sequence continues from where replay left it, which can be up to 32 values past the last one used: Postgres writes sequences to the WAL in batches, so any recovery skips some values, but never hands one out twice. Foreign keys to tables that were not restored are left out, and printed with the statement that adds each back. Tables are loaded in one transaction, with the target's restore role (`credentials.restore`), so a failure loads nothing. A table that did not exist at the point is refused ([PTM-6004](../errors/PTM-6004.md)). stdout lists the tables written.
+
+**Rewinding the whole cluster.** `--mode=rewind --data-dir <dir>` restores and replays the whole cluster to the point into `<dir>`, an empty or new directory on this machine, then stops it cleanly with the cluster's own configuration files back in place and pentym's side role removed. pentym never stops or writes to production: it prints the steps to replace production's data directory with `<dir>`, which loses every change after the point, so on a terminal it first asks you to type the target's name. A cluster with tablespaces cannot be rewound this way; restore its tables instead.
+
+`--json` prints the snapshot used, where replay stopped, the tables loaded with their row counts, the foreign keys left out, and the rewound directory. The restore is journaled with the restore credential it used.
+
 ## `pentym dump <snapshot>`
 
 Exports a snapshot as a plain file, decrypted and reassembled, so the data is never locked in: the database's own tools restore it without pentym (PRD 7.1).

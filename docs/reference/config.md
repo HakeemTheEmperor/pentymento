@@ -39,6 +39,7 @@ Unknown keys are rejected with the file and line, so a misspelt key never passes
 | `targets.<name>.credentials.backup.user` | The role (Postgres) or user (MongoDB) base backups connect as. Postgres needs `REPLICATION`; MongoDB needs the `backup` role and read on `local`. Leave it out for MongoDB x.509 (`authMechanism=MONGODB-X509` in `uri`) |
 | `targets.<name>.credentials.backup.password` | A [secret reference](#secrets) to its password; leave it out for certificates, peer authentication or `.pgpass` |
 | `targets.<name>.credentials.replication.user`, `.password` | The role log capture connects as: for Postgres it needs `REPLICATION`, as `pentym_repl`; for MongoDB it needs `read` on the `local` database. When unset, capture uses `credentials.backup` |
+| `targets.<name>.credentials.restore.user`, `.password` | The role `pentym restore` loads tables into production as (Postgres, such as `pentym_restore`); it needs to create tables in the target schema, and nothing more. There is no fallback: the backup role must not be able to write |
 | `targets.<name>.slot` | The physical replication slot WAL capture streams from (Postgres); default `pentym_` and the target name with `-` turned into `_`. pentym creates it if it does not exist, and never drops a slot that still holds WAL |
 | `instance_provider` | Side-instance providers to try, in order: `docker`, `local`; default `[docker, local]` |
 | `work_dir` | Directory for side-instance files and temporary credential files; must be absolute; default `pentym/work` in the user's cache directory |

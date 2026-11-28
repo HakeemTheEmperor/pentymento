@@ -53,6 +53,9 @@ IDs are permanent: an ID is never reused and never changes meaning.
 | [PTM-4007](PTM-4007.md) | agent-slot-can-read |
 | [PTM-5001](PTM-5001.md) | capture-gap |
 | [PTM-6001](PTM-6001.md) | no-instance-provider |
+| [PTM-6002](PTM-6002.md) | restore-point-unreachable |
+| [PTM-6003](PTM-6003.md) | restore-object-exists |
+| [PTM-6004](PTM-6004.md) | restore-object-missing |
 | [PTM-7001](PTM-7001.md) | object-missing |
 | [PTM-7002](PTM-7002.md) | object-corrupt |
 | [PTM-7003](PTM-7003.md) | pack-unindexed |

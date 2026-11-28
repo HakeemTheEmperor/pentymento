@@ -59,7 +59,7 @@ func (a *app) rootCommand() *cobra.Command {
 		a.backupCommand(),
 		a.agentCommand(),
 		a.catchUpCommand(),
-		restoreCommand(),
+		a.restoreCommand(),
 		eventsCommand(),
 		a.listCommand(),
 		a.statusCommand(),
@@ -122,20 +122,6 @@ func group(use, short string, ex ...string) *cobra.Command {
 			return newUsageError(cmd, fmt.Sprintf("%s needs a subcommand: %s", cmd.CommandPath(), strings.Join(names, ", ")))
 		},
 	}
-}
-
-func restoreCommand() *cobra.Command {
-	c := stub("restore <target>", "Restore a target to a point in time", args("<target>"),
-		"Restore prod-pg to just before event 3", "pentym restore prod-pg --before-event 3",
-		"Restore prod-pg to just before transaction 8812", "pentym restore prod-pg --xid 8812",
-		"Rewind the whole prod-pg cluster to just before event 3 (destructive)", "pentym restore prod-pg --before-event 3 --mode=rewind")
-	f := c.Flags()
-	f.String("at", "", "restore to this point in time")
-	f.String("xid", "", "restore to just before this transaction (Postgres)")
-	f.String("before-event", "", "restore to just before this event (see pentym events)")
-	f.Bool("in-place", false, "load recovered objects under their original names instead of a safe name")
-	f.String("mode", "", "rewind: restore the whole cluster to the point instead of extracting objects (destructive)")
-	return c
 }
 
 func eventsCommand() *cobra.Command {

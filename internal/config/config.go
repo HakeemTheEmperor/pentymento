@@ -236,6 +236,10 @@ type Credentials struct {
 	// Replication captures the log (Postgres WAL through the replication
 	// slot); when its user is empty, capture uses Backup.
 	Replication Credential `yaml:"replication"`
+	// Restore loads restored tables or collections into production
+	// (pentym_restore). It has no fallback: the backup role must not be
+	// able to write.
+	Restore Credential `yaml:"restore"`
 }
 
 // CaptureCredential is the credential log capture connects with: the

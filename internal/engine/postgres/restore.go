@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 
 	"github.com/HakeemTheEmperor/pentymento/internal/engine"
 	"github.com/HakeemTheEmperor/pentymento/internal/instance"
+	"github.com/HakeemTheEmperor/pentymento/internal/msg"
 	"github.com/HakeemTheEmperor/pentymento/internal/secrets"
 )
 
@@ -69,15 +71,23 @@ host all ` + SideRole + ` ::/0 scram-sha-256
 `
 
 // Restore materializes a snapshot into req.DataDir and starts a side
-// instance over it (SDD 6.4 step 4): base.tar into the data directory,
-// each tablespace archive as an in-place tablespace under pg_tblspc, so
-// no link points outside the directory. The WAL in base.tar brings the
-// cluster to a consistent state when it starts. pentym's own
+// instance over it (SDD 6.4 steps 4 and 5): base.tar into the data
+// directory, each tablespace archive as an in-place tablespace under
+// pg_tblspc, so no link points outside the directory. The WAL in base.tar
+// brings the cluster to a consistent state when it starts. pentym's own
 // configuration replaces production's, and access is locked to a new
 // superuser with a random password once pentym has created it.
+//
+// With a point, the stored WAL from req.Logs is put in pg_wal and the
+// cluster recovers to just before the point (recovery_target_time,
+// _xid or _lsn with recovery_target_inclusive off), then is promoted.
+// Postgres stamps only commits with times, so a time after the last
+// commit in the WAL is reached by replaying all of it: the state is the
+// same.
 func (e *Engine) Restore(ctx context.Context, req engine.RestoreRequest, start engine.StartFunc) (instance.Instance, *engine.Reached, error) {
-	if req.Point != (engine.Point{}) {
-		return nil, nil, fmt.Errorf("restoring to a point: %w", errNotYet)
+	pitr := req.Point != (engine.Point{})
+	if pitr && req.Logs == nil {
+		return nil, nil, errors.New("restoring to a point needs the stored WAL")
 	}
 	for _, name := range req.Archives.Names() {
 		var dir string
@@ -96,17 +106,167 @@ func (e *Engine) Restore(ctx context.Context, req engine.RestoreRequest, start e
 	if err := prepareConfig(req.DataDir); err != nil {
 		return nil, nil, err
 	}
+	if pitr {
+		if err := e.stageWAL(ctx, req); err != nil {
+			return nil, nil, err
+		}
+		if err := writeRecovery(req.DataDir, recoveryTarget(req.Point)); err != nil {
+			return nil, nil, err
+		}
+	}
 	major, _, _ := strings.Cut(req.Backup.EngineVersion, ".")
 	inst, err := start(ctx, major, req.DataDir)
 	if err != nil {
 		return nil, nil, err
 	}
 	conn, err := e.lockSideInstance(ctx, inst, req)
+	if err != nil && pitr && strings.Contains(err.Error(), targetNotReached) {
+		_ = inst.Stop(context.WithoutCancel(ctx))
+		if req.Point.Time.IsZero() {
+			return nil, nil, notReached(req.Point)
+		}
+		// No commit in the stored WAL is as late as the time: replaying
+		// all of it gives the state at that time.
+		e.logger().Info("no commit after the restore time in the stored WAL; replaying all of it", "time", req.Point.Time)
+		if err := writeRecovery(req.DataDir, ""); err != nil {
+			return nil, nil, err
+		}
+		if inst, err = start(ctx, major, req.DataDir); err != nil {
+			return nil, nil, err
+		}
+		conn, err = e.lockSideInstance(ctx, inst, req)
+	}
 	if err != nil {
 		_ = inst.Stop(context.WithoutCancel(ctx))
 		return nil, nil, err
 	}
-	return &sideInstance{Instance: inst, conn: conn}, &engine.Reached{Position: req.Backup.End}, nil
+	reached := &engine.Reached{Position: req.Backup.End}
+	if pitr {
+		if reached, err = replayed(ctx, conn); err != nil {
+			_ = inst.Stop(context.WithoutCancel(ctx))
+			return nil, nil, err
+		}
+	}
+	return &sideInstance{Instance: inst, conn: conn}, reached, nil
+}
+
+// targetNotReached is how Postgres says the WAL ended before the
+// recovery target.
+const targetNotReached = "recovery ended before configured recovery target was reached"
+
+func notReached(p engine.Point) error {
+	what := "WAL position " + string(p.Before)
+	if p.XID != "" {
+		what = "transaction " + p.XID
+	}
+	return &msg.Error{Code: msg.ExitUnrecoverable, Message: msg.Message{
+		Level: msg.LevelFailed, Fact: "the captured WAL does not reach " + what + " from the snapshot it was replayed from",
+		Impact: "nothing was restored; a transaction ID that never committed, or committed before the snapshot, is never reached",
+		Next:   "check the transaction ID, or restore to a time with --at",
+	}}
+}
+
+// recoveryTarget is the recovery setting for a point.
+func recoveryTarget(p engine.Point) string {
+	switch {
+	case !p.Time.IsZero():
+		return "recovery_target_time = '" + p.Time.UTC().Format("2006-01-02 15:04:05.999999") + "+00'\n"
+	case p.XID != "":
+		return "recovery_target_xid = '" + p.XID + "'\n"
+	}
+	lsn := string(p.Before)
+	if strings.Count(lsn, "/") == 2 { // <timeline>/<LSN>
+		_, lsn, _ = strings.Cut(lsn, "/")
+	}
+	return "recovery_target_lsn = '" + lsn + "'\n"
+}
+
+// writeRecovery appends the recovery settings to the side instance's
+// postgresql.conf, over any written before, and writes recovery.signal.
+// An empty target replays all the WAL.
+func writeRecovery(dataDir, target string) error {
+	path := filepath.Join(dataDir, "postgresql.conf")
+	conf := sideConf + recoveryMarker +
+		"hot_standby = off\n" + // no login until replay is done
+		// Archive recovery needs a restore_command. This one fails for
+		// every file, under sh and cmd alike, so Postgres reads each from
+		// pg_wal, where pentym put them.
+		"restore_command = 'exit 1'\n" +
+		"recovery_target_timeline = 'latest'\n"
+	if target != "" {
+		conf += target + "recovery_target_inclusive = off\nrecovery_target_action = 'promote'\n"
+	}
+	if err := os.WriteFile(path, []byte(conf), 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dataDir, "recovery.signal"), nil, 0o600)
+}
+
+// recoveryMarker starts the recovery settings in postgresql.conf.
+const recoveryMarker = "# Recovery, written by pentym: replay the WAL in pg_wal, then promote.\n"
+
+// stageWAL puts the stored WAL into pg_wal: history files as they are,
+// segments by name, and a partial segment padded with zeros to the
+// segment size under the segment's name, as Postgres reads only whole
+// segment files. One file is in memory at a time.
+func (e *Engine) stageWAL(ctx context.Context, req engine.RestoreRequest) error {
+	size := req.Backup.WALSegmentSize
+	if size <= 0 {
+		size = 16 << 20
+	}
+	names, err := req.Logs.Names(ctx, req.Backup.Start, req.Point.Before)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(req.DataDir, "pg_wal")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	for _, name := range names {
+		file, partial := strings.CutSuffix(name, ".partial")
+		if !walFileRE.MatchString(file) {
+			return fmt.Errorf("%q is not a WAL file name", name)
+		}
+		data, err := req.Logs.Segment(ctx, name)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", name, err)
+		}
+		if partial && int64(len(data)) < size {
+			data = append(data, make([]byte, size-int64(len(data)))...)
+		}
+		if err := os.WriteFile(filepath.Join(dir, file), data, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// walFileRE matches what may be staged into pg_wal.
+var walFileRE = regexp.MustCompile(`^[0-9A-F]{24}$|^[0-9A-F]{8}\.history$`)
+
+// replayedQuery reads where recovery stopped: the last WAL record and
+// transaction it applied.
+const replayedQuery = `SELECT coalesce(pg_last_wal_replay_lsn()::text, ''),
+	coalesce(to_char(pg_last_xact_replay_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'), '')`
+
+// replayed reports where recovery stopped.
+func replayed(ctx context.Context, c instance.Conn) (*engine.Reached, error) {
+	conn, err := sideConnect(ctx, c, c.User, c.Password)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	rows, err := query(ctx, conn, replayedQuery)
+	if err != nil || len(rows) != 1 {
+		return nil, fmt.Errorf("read where recovery stopped: %v", err)
+	}
+	r := &engine.Reached{Position: engine.Position(rows[0][0])}
+	if rows[0][1] != "" {
+		if r.Time, err = time.Parse(time.RFC3339Nano, rows[0][1]); err != nil {
+			return nil, fmt.Errorf("read where recovery stopped: %w", err)
+		}
+	}
+	return r, nil
 }
 
 // sideInstance is a started instance with pentym's side role as its login.
@@ -313,6 +473,11 @@ func (e *Engine) lockSideInstance(ctx context.Context, inst instance.Instance, r
 		return instance.Conn{}, err
 	}
 	pw = secrets.New([]byte(hex.EncodeToString(b)))
+	existing, err := query(ctx, conn, "SELECT 1 FROM pg_roles WHERE rolname = '"+SideRole+"'")
+	if err != nil {
+		return instance.Conn{}, err
+	}
+	e.sideRoleExisted = len(existing) > 0
 	sql := fmt.Sprintf(`DO $$ BEGIN
 IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '%[1]s') THEN ALTER ROLE %[1]s SUPERUSER LOGIN PASSWORD '%[2]s';
 ELSE CREATE ROLE %[1]s SUPERUSER LOGIN PASSWORD '%[2]s'; END IF; END $$`, SideRole, pw.Expose())
