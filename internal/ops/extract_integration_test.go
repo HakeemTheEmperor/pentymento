@@ -145,9 +145,7 @@ func TestPostgresExtract(t *testing.T) {
 				if got := pgSQLAll(t, dsn, "SELECT count(*)::text FROM pg_constraint WHERE conrelid = '"+name+"'::regclass AND contype = 'c'"); got != "1" {
 					t.Errorf("%s check constraints on the copy", got)
 				}
-				if got := pgSQLAll(t, dsn, "SELECT nextval('orders_id_seq"+sfx+"')::text"); got != "106" {
-					t.Errorf("the sequence continues at %s, want 106", got)
-				}
+				checkSequence(t, dsn, "orders_id_seq"+sfx, name)
 				if len(ex.SkippedForeignKeys) != 1 || ex.SkippedForeignKeys[0].References != "customers" ||
 					!strings.Contains(ex.SkippedForeignKeys[0].Statement, "FOREIGN KEY (customer_id) REFERENCES customers(id)") {
 					t.Errorf("skipped foreign keys = %+v", ex.SkippedForeignKeys)
@@ -182,9 +180,7 @@ func TestPostgresExtract(t *testing.T) {
 				if res.Extracted.Objects[0].Name != "public.orders" || pgSQLAll(t, dsn, "SELECT count(*)::text FROM orders") != "105" {
 					t.Errorf("in place: %+v", res.Extracted.Objects)
 				}
-				if got := pgSQLAll(t, dsn, "SELECT nextval('orders_id_seq')::text"); got != "106" {
-					t.Errorf("the sequence continues at %s", got)
-				}
+				checkSequence(t, dsn, "orders_id_seq", "orders")
 				_, err = restore(t, &engine.ExtractRequest{Objects: []string{"orders"}, InPlace: true}, "")
 				var me *msg.Error
 				if !errors.As(err, &me) || me.Message.ID != postgres.IDObjectExists {
@@ -237,5 +233,22 @@ func TestPostgresExtract(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// checkSequence checks a restored sequence continues past every restored
+// id, so it never hands one out again. Postgres logs sequences to WAL 32
+// values ahead (SEQ_LOG_VALS), and again on the first nextval after each
+// checkpoint, so replay resumes up to 32 values further than the last
+// value used, as after any crash recovery: a gap, never a reuse.
+func checkSequence(t *testing.T, dsn, seq, table string) {
+	t.Helper()
+	next, err1 := strconv.ParseInt(pgSQLAll(t, dsn, "SELECT nextval('"+seq+"')::text"), 10, 64)
+	top, err2 := strconv.ParseInt(pgSQLAll(t, dsn, "SELECT max(id)::text FROM "+table), 10, 64)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("read %s: %v, %v", seq, err1, err2)
+	}
+	if next <= top || next > top+33 {
+		t.Errorf("%s continues at %d, after the restored ids up to %d: want %d to %d", seq, next, top, top+1, top+33)
 	}
 }
